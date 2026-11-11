@@ -573,6 +573,9 @@ function setStatus(t, saved) {
   $('#status').classList.toggle('err', !!lastError);
 }
 function markDirty() { dirty = true; lastError = ''; setStatus('unsaved — export to keep it'); }
+/* What deserves a guard: unsaved state AND actual content. An empty tab cannot lose anything, and
+   a guard that interrupts a no-op teaches him to dismiss the ones that matter. */
+const guardNeeded = () => dirty && hasWork();
 
 /* ── the whole storage model, in one place ──────────────────────────────────────────────
    There is no server side. The graph lives in this tab and on disk only when YOU take it:
@@ -599,8 +602,55 @@ function exportFile() {
 function markExported() { dirty = false; lastError = ''; setStatus('exported ' + timeNow(), true); }
 const timeNow = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+const hasWork = () => doc.nodes.length > 0;
+/* ── unsaved-work guard ────────────────────────────────────────────────────────────────────
+   One dialog, three asks: New, Import, and a pasted graph. The gate is `dirty`, which is the
+   only honest signal this tab has — it means work exists here and nowhere else. When the graph
+   is clean the dialog stays out of the way, because a guard that cries wolf gets dismissed by
+   reflex and then fails at the moment it matters.
+
+   Deliberate shape: focus lands on "Keep working", and Enter and Esc both close without
+   destroying anything. The destructive option is reachable by mouse and by Tab, but nothing
+   triggers it by reflex — the model has no localStorage copy to fall back on, so an
+   accidental-Enter wipe would be unrecoverable.
+
+   Reload and close-tab can't reuse this box: a page may not style the browser's own leave
+   prompt. Those stay on the native beforeunload hook further down, gated on the same `dirty`. */
+let guardOpen = null;
+const cbox = {
+  root: $('#confirm'), title: $('#confirmTitle'), body: $('#confirmBody'),
+  go: $('#confirmGo'), done: $('#confirmNo'), keep: $('#confirmKeep'),
+  scrim: $('#confirm .scrim')
+};
+function askGuard({ title, body, goLabel, onGo }) {
+  if (guardOpen) return false;                    // one modal at a time
+  guardOpen = { onGo };
+  cbox.title.textContent = title;
+  cbox.body.textContent = body;                   // textContent: names in here come from files
+  cbox.done.textContent = goLabel;
+  cbox.root.classList.remove('hidden');
+  cbox.keep.focus();
+  return true;
+}
+function closeGuard(choice) {
+  if (!guardOpen) return;
+  const g = guardOpen;
+  guardOpen = null;                               // cleared before onGo so a re-ask can't nest
+  cbox.root.classList.add('hidden');
+  if (choice === 'go') g.onGo();
+}
+/* "Export first" answers both halves of the problem: the work lands on disk AND the thing he was
+   about to lose is exactly the thing he just kept. It closes the dialog rather than continuing,
+   because "exported, thanks" and "exported, now clear my graph" are different intents. */
+cbox.go.addEventListener('click', () => { snapshot(); exportFile(); closeGuard('none'); });
+cbox.done.addEventListener('click', () => closeGuard('go'));
+cbox.keep.addEventListener('click', () => closeGuard('keep'));
+cbox.scrim.addEventListener('click', () => closeGuard('keep'));
+
 /* Import is the only way a file gets in: picker, drag-drop, or paste. All three run hydrate(),
-   which validates rather than trusts — a malformed file must say so, not paint half a graph. */
+   which validates rather than trusts — a malformed file must say so, not paint half a graph.
+   The guard sits after the read and the parse on purpose: a broken file should not spend a click
+   on it, and hydrate throws before it touches `doc`, so a refusal never half-loads. */
 async function importFile(file) {
   let text;
   try { text = await file.text(); }
@@ -608,11 +658,28 @@ async function importFile(file) {
   let data;
   try { data = JSON.parse(text); }
   catch (e) { toast('not valid json: ' + e.message, 'err'); return; }
+  const go = () => commitImport(data, file.name);
+  /* Ask before replacing — but not about a file that cannot possibly load. This one check mirrors
+     hydrate's own first gate; anything deeper stays hydrate's job. So a shapeless file costs no
+     click and gets a precise complaint, while a shapey-but-broken file costs one click and still
+     cannot damage what is open, because hydrate throws before it touches doc. */
+  if (Array.isArray(data?.nodes) && guardNeeded()) {
+    askGuard({
+      title: 'Replace your graph with ' + file.name + '?',
+      body: 'Your current graph has unsaved changes that exist nowhere else. Export it first, or discard it and load this file.',
+      goLabel: 'Replace',
+      onGo: go
+    });
+    return;
+  }
+  go();
+}
+function commitImport(data, name) {
   try { snapshot(); hydrate(data); }
   catch (e) { toast('not a usable graph: ' + e.message, 'err'); return; }
-  doc.name = file.name.replace(/\.json$/i, '');
+  doc.name = name.replace(/\.json$/i, '');
   markDirty();
-  toast('loaded ' + file.name + ' — export again to keep it under this name', 'ok');
+  toast('loaded ' + name + ' — export again to keep it under this name', 'ok');
 }
 
 /* Drag a .json onto the page and it loads. Guarded so dragging text or an image out of another
@@ -716,6 +783,15 @@ function renderInspector() {
 }
 
 /* ── tools / chrome ──────────────────────────────────────────────────── */
+/* New / Import / paste all replace the whole graph, so all three route through the same guarded
+   replacement. Import passes `replace`: swapping one file for another when the current graph is
+   already saved isn't destructive, but swapping it for an unsaved one is. */
+function replaceGuarded(label, body, doIt) {
+  if (guardNeeded()) return askGuard({ title: label, body, goLabel: 'Discard', onGo: doIt });
+  doIt();
+  return false;
+}
+function newGraph() { snapshot(); hydrate({ name: 'untitled', nodes: [], edges: [] }); markDirty(); }
 function setTool() { document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool)); }
 document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => { tool = b.dataset.tool; pending = null; setTool(); renderInspector(); }));
 $('#btnLabels').addEventListener('click', () => { showLabels = !showLabels; $('#btnLabels').classList.toggle('active', showLabels); sync(); });
@@ -723,7 +799,12 @@ $('#btnView').addEventListener('click', () => { viewMode = viewMode === 'free' ?
 $('#btnFit').addEventListener('click', () => fit());
 $('#btnRelax').addEventListener('click', () => { wake(); toast('re-relaxing'); });
 $('#btnExport').addEventListener('click', () => { snapshot(); exportFile(); });
-$('#btnNew').addEventListener('click', () => { snapshot(); hydrate({ name: 'untitled', nodes: [], edges: [] }); toast('empty graph — press 2 and click to place a bubble'); markDirty(); });
+/* The three replaces are the only destructive things in the chrome, so they are the three that
+   ask. Once the graph is saved each one still works one-handed, with no dialog. */
+$('#btnNew').addEventListener('click', () => replaceGuarded(
+  'Start a new empty graph?',
+  'This tab holds your unsaved work and it is the only copy. Export it first, or discard it and start clean.',
+  () => { newGraph(); toast('empty graph — press 2 and click to place a bubble'); }));
 $('#btnImport').addEventListener('click', () => $('#fileInput').click());
 $('#fileInput').addEventListener('change', async (e) => {
   const f = e.target.files?.[0]; if (f) await importFile(f);
@@ -731,13 +812,18 @@ $('#fileInput').addEventListener('change', async (e) => {
 });
 installDragDrop();
 /* Paste a .json graph from the clipboard. Only when not typing, and only if it parses as a graph,
-   so pasting into the label field stays a normal paste. */
+   so pasting into the label field stays a normal paste. It replaces the whole graph, so it asks
+   first — but only after it is certain the text is a graph, never over a stray pasted brace. */
 addEventListener('paste', async (e) => {
   if (/^(input|textarea)$/i.test(document.activeElement?.tagName || '')) return;
   const text = e.clipboardData?.getData('text') || '';
   if (!text.trim().startsWith('{')) return;
-  try { const d = JSON.parse(text); if (!Array.isArray(d.nodes)) return; snapshot(); hydrate(d); markDirty(); toast('pasted graph', 'ok'); }
-  catch (err) { /* not json, not our business */ }
+  let d;
+  try { d = JSON.parse(text); } catch (err) { return; }   // not json, not our business
+  if (!Array.isArray(d.nodes)) return;
+  replaceGuarded('Replace your graph with the pasted one?',
+    'Your current graph has unsaved changes that exist nowhere else. Export it first, or discard it and take the pasted one.',
+    () => commitImport(d, d.name || 'pasted graph'));
 });
 $('#btnHelp').addEventListener('click', () => $('#help').classList.toggle('hidden'));
 
@@ -745,6 +831,20 @@ addEventListener('keydown', (e) => {
   const typing = /^(input|textarea|select)$/i.test(document.activeElement?.tagName || '');
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); snapshot(); exportFile(); return; }
+  /* A modal takes the keyboard first. While it is open nothing else may act on the graph
+     underneath — no tool key, no ⌫, no F/R/L/V, and an Escape that closes the dialog instead of
+     clearing the selection. ⌘S above still works, because "Export first" is a button on the box.
+     Deliberately no key reaches Discard: Enter and Esc both mean "keep working", so the
+     destructive option needs a pointer. Tab still reaches it, so a keyboard user isn't locked out
+     — that's a choice, not a reflex. */
+  if (guardOpen) {
+    /* If he has Tab'd onto a button himself, that button is what Enter means. Overriding it here
+       would make the destructive option keyboard-inaccessible rather than keyboard-safe. */
+    const a = document.activeElement;
+    if (a && a.tagName === 'BUTTON' && cbox.root.contains(a) && e.key === 'Enter') return;
+    if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); closeGuard('keep'); }
+    return;
+  }
   if (typing) return;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   const map = { '1': 'select', '2': 'node', '3': 'link', '4': 'overlap', '5': 'contain', '6': 'gravity', '7': 'cut', '8': 'delete' };
@@ -843,6 +943,9 @@ window.__bubble = {
                                 vw: innerWidth, vh: innerHeight } : null;
   },
   get doc() { return doc; }, get ui() { return ui; }, get selected() { return selected; },
+  /* Unsaved-work guard state, read live. A test that asserts "the graph is still there" without
+     being able to ask whether the tab considers it unsaved would be asserting half the condition. */
+  get dirty() { return dirty; }, get guardOpen() { return !!guardOpen; },
   /* Live handles on the renderer itself, added for probe_selection.py (its successor): a probe needs to
      change exactly ONE thing (a light, the exposure, a shell's opacity) and measure the frame,
      which it cannot do through the model. Getters return the real objects, never copies, so a

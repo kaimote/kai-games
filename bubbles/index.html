@@ -150,6 +150,25 @@
     font: 500 15px/1 var(--sans); letter-spacing: .02em;
   }
   body.dropping::after { display: grid; }
+
+  /* Unsaved-work guard. z-index sits above the HUD (10) and the drop affordance (30) but BELOW
+     #toasts (40), because the export confirmation has to be readable while this is open — "export
+     first" is a button on this dialog. */
+  #confirm { position: fixed; inset: 0; z-index: 35; display: grid; place-items: center; }
+  #confirm .scrim { position: absolute; inset: 0; background: rgba(4, 6, 11, 0.72); }
+  #confirm .box {
+    position: relative; width: min(430px, calc(100vw - 40px)); padding: 20px 22px 16px;
+    border-radius: 16px; border-color: var(--line-strong);
+  }
+  #confirm h2 { font: 600 15px/1.35 var(--sans); color: var(--text); margin-bottom: 8px; }
+  #confirm p { font: 400 13px/1.55 var(--sans); color: var(--dim); }
+  #confirm p b { color: var(--text); font-weight: 600; }
+  #confirm .row { display: flex; align-items: center; gap: 6px; margin-top: 16px; }
+  #confirm .row .spacer { flex: 1; }
+  /* 10.5px mono is the smallest text in the app, so it gets the brightest ink it can stand and
+     still read as a footnote: measured 3.83:1 at var(--dim)/.85, which is under AA for text this
+     size. var(--dim) at full strength measures 4.8:1 against the panel. */
+  #confirm .hint { margin-top: 10px; font: 500 10.5px/1.5 var(--mono); color: var(--dim); letter-spacing: .02em; }
 </style>
 </head>
 <body>
@@ -232,11 +251,31 @@
     <span>F</span><em>fit view &nbsp;·&nbsp; R relax &nbsp;·&nbsp; L labels &nbsp;·&nbsp; V view 3D/top/front</em>
     <span>drag</span><em>orbit &nbsp;·&nbsp; wheel zoom &nbsp;·&nbsp; drag a bubble to move it</em>
     <span>⌘click</span><em>with bubble tool: nest inside what you clicked</em>
+    <span>Enter / Esc</span><em>on a guard dialog: keep working (Tab reaches the other buttons)</em>
   </div>
   <p style="margin-top:10px"><b>nothing is stored anywhere.</b> the graph lives in this tab. <em>Export</em> (or ⌘S) gives you a .json you own; <em>Import</em>, dragging a file onto the page, or pasting json loads one back. Reload without exporting and it is gone — that is the whole storage model, on purpose.</p>
 </div>
 
 <div id="toasts"></div>
+
+<!-- Unsaved-work guard. Not a <dialog> and no confirm(): this page is fully offline and static,
+     and window.confirm blocks the render loop — an ugly price for a nicer-looking box. Nothing
+     outside this file references it. -->
+<div id="confirm" class="hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle confirmBody">
+  <div class="scrim"></div>
+  <div class="box glass">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmBody"></p>
+    <div class="row">
+      <button class="btn primary" id="confirmGo">Export first</button>
+      <button class="btn danger" id="confirmNo">Discard</button>
+      <span class="spacer"></span>
+      <button class="btn" id="confirmKeep">Keep working</button>
+    </div>
+    <div class="hint">Enter or Esc keeps working · Tab reaches the other buttons · ⌘S exports from here too</div>
+  </div>
+</div>
+
 <input type="file" id="fileInput" accept=".json,application/json">
 <div id="loading">initialising&nbsp;scene…</div>
 
