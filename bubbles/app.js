@@ -151,7 +151,13 @@ function sync() {
     if (!e) {
       const mat = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(n.color), roughness: 0.42, metalness: 0.06,
-        transparent: true, opacity: 0.19, side: THREE.DoubleSide, depthWrite: false,
+        // 0.19 measured as ~1% of the bubble's own pixels above background (probe_visibility.py):
+        // present in the render, invisible as a body. 0.34 is the point where colour arrives
+        // (measured: 11% at .30, 22% at .35) without the fill outshining the wire that draws the
+        // relationship. The ladder is one lever at a time; rim/core held at 0.72–0.74 across it, so
+        // it is still the same glass, not a matte ball. Final call on "too much" belongs to eyes
+        // that work, which mine do not — I measure pixels, I don't see them.
+        transparent: true, opacity: 0.34, side: THREE.DoubleSide, depthWrite: false,
         clearcoat: 0.9, clearcoatRoughness: 0.35, sheen: 0.5, ior: 1.35,
       });
       const mesh = new THREE.Mesh(SPHERE, mat); mesh.userData.id = n.id;
@@ -173,7 +179,11 @@ function sync() {
     }
     const sel = selected === n.id;
     const pend = pending === n.id;
-    e.mesh.material.opacity = sel ? 0.44 : 0.19;
+    // Selected has to stay brighter than the base, and 0.44 no longer clears 0.34: measured on the
+    // same bubble before/after a click (probe_selection.py), the cue was +30.7 luminance
+    // at .44/.19, collapsed to +22.7 at .44/.34, and came back to +32.1 at .58/.34. Absolute delta
+    // restored; the ratio is lower (2.54 vs 3.40) because the floor rose, which is the point.
+    e.mesh.material.opacity = sel ? 0.58 : 0.34;
     e.mesh.material.emissive = new THREE.Color(sel ? n.color : pend ? '#ffffff' : '#000000');
     e.mesh.material.emissiveIntensity = sel ? 0.55 : pend ? 0.22 : 0;
     e.wire.material.opacity = sel ? 0.5 : 0.16;
@@ -833,6 +843,14 @@ window.__bubble = {
                                 vw: innerWidth, vh: innerHeight } : null;
   },
   get doc() { return doc; }, get ui() { return ui; }, get selected() { return selected; },
+  /* Live handles on the renderer itself, added for probe_selection.py (its successor): a probe needs to
+     change exactly ONE thing (a light, the exposure, a shell's opacity) and measure the frame,
+     which it cannot do through the model. Getters return the real objects, never copies, so a
+     change made in a probe is a change the next render actually uses. */
+  get scene() { return scene; }, get renderer() { return renderer; }, get meshes() { return meshes; },
+  /* Camera too: a probe that wants the true silhouette area of each bubble (rather than a fat
+     bounding box) has to project the same camera the frame was drawn with. */
+  get camera() { return camera; },
   kinds() {                                   // every relationship the model currently asserts
     const out = { inside: [], contains: [], link: [], gravity: [], overlap: [] };
     for (const [c, p] of ui.parent) out.inside.push([c, p]);
