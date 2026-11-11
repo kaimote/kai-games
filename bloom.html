@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bloom</title>
+<style>
+  html,body{margin:0;height:100%;background:#141110;
+    display:flex;align-items:center;justify-content:center;
+    font-family:ui-rounded,"Segoe UI",system-ui,sans-serif;color:#e9e2d5;}
+  #wrap{display:flex;flex-direction:column;align-items:center;gap:10px;}
+  canvas{background:radial-gradient(circle at 50% 78%,#2a211c,#161310 70%);
+    border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.5);touch-action:none;}
+  .hint{font-size:13px;opacity:.55;letter-spacing:.3px;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="360" height="480"></canvas>
+  <div class="hint">hold to water &middot; release to let it rest &middot; keep the blue in the green</div>
+</div>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+
+// ---- state ----
+let water   = 0.55;   // 0 = thirsty, 1 = drowning
+let bloom   = 0.0;    // 0 = seed, 1 = full bloom
+let holding = false;
+let won     = false;
+let sway    = 0;
+
+const BAND_LO = 0.34, BAND_HI = 0.72;   // healthy water window
+const WATER_UP   = 0.9;   // water/s while holding
+const WATER_DOWN = 0.35;  // water/s while released
+const BLOOM_UP   = 0.11;  // bloom/s while in band
+const BLOOM_DRIP = 0.05;  // bloom/s lost while out of band
+
+// fixed timestep so it plays the same on 60/120/144Hz
+const STEP = 1000/60;
+let last = performance.now(), acc = 0;
+
+// ---- input ----
+function down(e){ e.preventDefault(); holding = true; if(won) reset(); }
+function up(){ holding = false; }
+cv.addEventListener('mousedown', down);
+window.addEventListener('mouseup', up);
+cv.addEventListener('touchstart', down, {passive:false});
+cv.addEventListener('touchend', up);
+window.addEventListener('keydown', e=>{ if((e.code==='Space'||e.code==='KeyA') && !e.repeat){ holding=true; if(won) reset(); }});
+window.addEventListener('keyup',   e=>{ if(e.code==='Space'||e.code==='KeyA') holding=false; });
+
+function reset(){ bloom = 0; water = 0.55; won = false; }
+
+// ---- sim (fixed step) ----
+function update(){
+  sway += 0.03;
+  if(won) return;
+  water += (holding ? WATER_UP : -WATER_DOWN) * (STEP/1000);
+  water = Math.max(0, Math.min(1, water));
+  if(water >= BAND_LO && water <= BAND_HI){
+    bloom += BLOOM_UP * (STEP/1000);
+  } else {
+    // thirsty or drowning: the plant pays for it
+    bloom -= BLOOM_DRIP * (STEP/1000);
+  }
+  bloom = Math.max(0, Math.min(1, bloom));
+  if(bloom >= 1) won = true;
+}
+
+// ---- draw ----
+function inBand(){ return water>=BAND_LO && water<=BAND_HI; }
+
+function drawGauge(){
+  const gx = W-42, gy = 70, gh = H-160, gw = 16;
+  // track
+  roundRect(gx, gy, gw, gh, 8, '#241f1b');
+  // healthy band
+  const by = gy + gh*(1-BAND_HI), bh = gh*(BAND_HI-BAND_LO);
+  roundRect(gx, by, gw, bh, 4, 'rgba(120,180,120,.28)');
+  // water fill
+  const fillH = gh*water;
+  roundRect(gx, gy+gh-fillH, gw, fillH, 8, inBand()?'#6fb3e6':'#d98b4a');
+  // marker line at top of fill
+  ctx.strokeStyle='rgba(255,255,255,.6)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(gx-4,gy+gh-fillH);ctx.lineTo(gx+gw+4,gy+gh-fillH);ctx.stroke();
+}
+
+function drawPlant(){
+  const baseX = W/2 - 6, baseY = H-90;
+  const h = 20 + bloom*(H-230);           // stem grows with bloom
+  const topY = baseY - h;
+  const sw = Math.sin(sway)*(4+bloom*6);  // gentle sway
+
+  // soil
+  ctx.fillStyle='#3a2c20';
+  ctx.beginPath();ctx.ellipse(baseX, baseY+6, 60+bloom*10, 16, 0, 0, Math.PI*2);ctx.fill();
+
+  // stem
+  ctx.strokeStyle='#5f7d44';ctx.lineWidth=4+bloom*3;ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(baseX, baseY);
+  ctx.quadraticCurveTo(baseX+sw, (baseY+topY)/2, baseX+sw, topY);
+  ctx.stroke();
+
+  // leaves (appear as it grows)
+  if(bloom>0.15) leaf(baseX+sw*0.5, baseY-h*0.45, -1, 0.5+bloom*0.6);
+  if(bloom>0.35) leaf(baseX+sw*0.7, baseY-h*0.68,  1, 0.5+bloom*0.6);
+  if(bloom>0.55) leaf(baseX+sw*0.9, baseY-h*0.88, -1, 0.55+bloom*0.5);
+
+  // bud / flower
+  const r = 6 + bloom*34;
+  const fx = baseX+sw, fy = topY;
+  if(bloom < 0.7){
+    // closed bud
+    ctx.fillStyle = '#7fa05a';
+    ctx.beginPath();ctx.ellipse(fx, fy, r*0.6, r*0.85, 0, 0, Math.PI*2);ctx.fill();
+  } else {
+    // opening petals
+    const open = (bloom-0.7)/0.3;
+    const petals = 6;
+    for(let i=0;i<petals;i++){
+      const a = (i/petals)*Math.PI*2 + sway*0.2;
+      const px = fx + Math.cos(a)*r*0.7*open;
+      const py = fy + Math.sin(a)*r*0.7*open;
+      ctx.fillStyle = mix('#e8b7c6','#ff8fb0', open);
+      ctx.beginPath();ctx.ellipse(px, py, r*0.55, r*0.34, a, 0, Math.PI*2);ctx.fill();
+    }
+    ctx.fillStyle='#ffd27a';
+    ctx.beginPath();ctx.arc(fx,fy, 5+open*7, 0, Math.PI*2);ctx.fill();
+  }
+}
+
+function leaf(x,y,dir,scale){
+  ctx.save();ctx.translate(x,y);ctx.scale(dir,1);
+  ctx.fillStyle='#6f9350';
+  ctx.beginPath();
+  ctx.ellipse(18*scale,0, 20*scale, 9*scale, -0.35, 0, Math.PI*2);
+  ctx.fill();ctx.restore();
+}
+
+function drawText(){
+  ctx.textAlign='center';
+  if(won){
+    ctx.fillStyle='#ffe0a3';ctx.font='600 26px ui-rounded,system-ui,sans-serif';
+    ctx.fillText('full bloom', W/2, 56);
+    ctx.fillStyle='rgba(233,226,213,.5)';ctx.font='13px ui-rounded,system-ui,sans-serif';
+    ctx.fillText('hold to bloom again', W/2, 80);
+  } else {
+    ctx.fillStyle='rgba(233,226,213,.55)';ctx.font='13px ui-rounded,system-ui,sans-serif';
+    ctx.fillText(bloom<0.5 ? 'it\u2019s listening to your hand' : 'so close, keep it steady', W/2, 40);
+  }
+}
+
+function loop(now){
+  acc += now-last; last = now;
+  if(acc>200) acc=200;
+  while(acc>=STEP){ update(); acc-=STEP; }
+  ctx.clearRect(0,0,W,H);
+  drawGauge();
+  drawPlant();
+  drawText();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---- helpers ----
+function roundRect(x,y,w,h,r,color){
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.fill();
+}
+function mix(a,b,t){
+  const pa=hex(a), pb=hex(b);
+  const c=pa.map((v,i)=>Math.round(v+(pb[i]-v)*t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+function hex(h){ h=h.replace('#',''); return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16)); }
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rain</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1016;overflow:hidden;cursor:none}
+  canvas{display:block;width:100%;height:100%}
+  .hint{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
+    color:#5b6b7d;font:12px/1.4 system-ui,sans-serif;letter-spacing:.04em;
+    text-align:center;opacity:.7;transition:opacity 1.2s;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">move to drift through it &middot; click to hold an umbrella up</div>
+<script>
+const c = document.getElementById('c'), x = c.getContext('2d');
+let W, H, dpr;
+function size(){ dpr = Math.min(devicePixelRatio||1, 2);
+  W = innerWidth; H = innerHeight;
+  c.width = W*dpr; c.height = H*dpr; x.setTransform(dpr,0,0,dpr,0,0); }
+addEventListener('resize', size); size();
+
+const drops = [];
+const N = 220;
+for(let i=0;i<N;i++) drops.push(newDrop(true));
+function newDrop(seed){
+  return {
+    x: Math.random()*W,
+    y: seed ? Math.random()*H : -20,
+    len: 8 + Math.random()*14,
+    sp: 6 + Math.random()*9,
+    wind: 0.4 + Math.random()*0.5,
+    a: 0.15 + Math.random()*0.35
+  };
+}
+
+let mouse = {x:W/2, y:H/2, on:false};
+addEventListener('mousemove', e=>{ mouse.x=e.clientX; mouse.y=e.clientY; mouse.on=true;
+  hideHint(); });
+let hold = false;
+addEventListener('mousedown', ()=>{ hold=true; hideHint(); });
+addEventListener('mouseup', ()=> hold=false);
+addEventListener('touchstart', e=>{ const t=e.touches[0];
+  mouse.x=t.clientX; mouse.y=t.clientY; mouse.on=true; hold=true; hideHint(); }, {passive:true});
+addEventListener('touchmove', e=>{ const t=e.touches[0];
+  mouse.x=t.clientX; mouse.y=t.clientY; }, {passive:true});
+addEventListener('touchend', ()=> hold=false);
+
+let hintHidden=false;
+function hideHint(){ if(!hintHidden){ hintHidden=true;
+  document.querySelector('.hint').style.opacity=0; } }
+
+let t=0;
+function frame(){
+  t+=0.016;
+  // sky — very faint gradient that shifts with time of the falling
+  const g = x.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#0b1016'); g.addColorStop(1,'#141d27');
+  x.fillStyle=g; x.fillRect(0,0,W,H);
+
+  const gust = Math.sin(t*0.6)*0.6;
+
+  for(const d of drops){
+    d.y += d.sp;
+    d.x += d.wind + gust;
+    if(d.y > H+20){ Object.assign(d, newDrop(false)); }
+    if(d.x > W+20) d.x = -10;
+
+    // soft dim when passing near the mouse — like you're walking under it
+    let alpha = d.a;
+    if(mouse.on){
+      const dx = d.x - mouse.x, dy = d.y - mouse.y;
+      const dist = Math.hypot(dx,dy);
+      if(dist < 70) alpha *= 0.25 + 0.75*(dist/70); // closer = dimmer, you're sheltering
+    }
+    x.strokeStyle = `rgba(150,180,215,${alpha})`;
+    x.lineWidth = 1;
+    x.beginPath();
+    x.moveTo(d.x, d.y);
+    x.lineTo(d.x - (d.wind+gust)*1.6, d.y - d.len);
+    x.stroke();
+  }
+
+  // umbrella — a simple arc that lifts when holding, near your cursor
+  if(mouse.on && hold){
+    const cx = mouse.x, cy = mouse.y - 18;
+    x.save();
+    x.shadowColor = 'rgba(0,0,0,0.5)'; x.shadowBlur = 12;
+    x.fillStyle = '#c56b5a';
+    x.beginPath();
+    x.arc(cx, cy, 46, Math.PI, 0);
+    x.fill();
+    // ribs
+    x.strokeStyle = 'rgba(0,0,0,0.25)'; x.lineWidth = 1;
+    for(let i=1;i<4;i++){ const px = cx - 46 + i*(92/4);
+      x.beginPath(); x.moveTo(cx,cy); x.lineTo(px,cy); x.stroke(); }
+    // handle
+    x.strokeStyle = '#8a5a4e'; x.lineWidth = 3; x.lineCap='round';
+    x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx, cy+52); x.stroke();
+    x.restore();
+  }
+
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

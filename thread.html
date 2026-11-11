@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<title>thread</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0c0c14;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    cursor: none;
+  }
+  canvas { display: block; }
+  #hud {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #a0d0ff;
+    font-size: 13px;
+    letter-spacing: 2px;
+    opacity: 0.7;
+  }
+  #hint {
+    position: absolute;
+    bottom: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(160,208,255,0.35);
+    font-size: 11px;
+    letter-spacing: 2px;
+  }
+  #snap {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    color: #a0d0ff;
+    font-size: 16px;
+    letter-spacing: 3px;
+    text-align: center;
+    display: none;
+  }
+  #snap .score { font-size: 28px; margin-top: 10px; }
+  #snap .restart { font-size: 11px; margin-top: 18px; opacity: 0.5; }
+</style>
+</head>
+<body>
+<div id="hud">eyelets: <span id="timer">0</span></div>
+<canvas id="c"></canvas>
+<div id="hint">steer the needle through the drifting eyelets</div>
+<div id="snap">
+  <div>the thread snapped</div>
+  <div class="score" id="final-score">0</div>
+  <div class="restart">click to rethread</div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('timer');
+const hint = document.getElementById('hint');
+const snapEl = document.getElementById('snap');
+const finalScoreEl = document.getElementById('final-score');
+
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+const mouse = { x: W / 2, y: H / 2 };
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+const EYELET_R = 28;
+const NEEDLE_R = 4;
+const THREAD_MAX = 400;
+
+let playing = true;
+let score = 0;
+let eyelet = null;
+let trail = [];
+
+function spawnEyelet() {
+  const margin = 80;
+  eyelet = {
+    x: margin + Math.random() * (W - margin * 2),
+    y: margin + Math.random() * (H - margin * 2),
+    vx: (Math.random() - 0.5) * 0.6,
+    vy: (Math.random() - 0.5) * 0.6,
+  };
+}
+
+function reset() {
+  score = 0;
+  trail = [];
+  playing = true;
+  hud.textContent = '0';
+  snapEl.style.display = 'none';
+  hint.style.opacity = '1';
+  setTimeout(() => hint.style.opacity = '0.35', 4000);
+  spawnEyelet();
+  mouse.x = W / 2;
+  mouse.y = H / 2;
+}
+
+window.addEventListener('click', () => { if (!playing) reset(); });
+
+function snap() {
+  playing = false;
+  finalScoreEl.textContent = score + (score === 1 ? ' eyelet' : ' eyelets');
+  snapEl.style.display = 'block';
+}
+
+function update() {
+  if (!playing) return;
+
+  // Eyelet drifts with soft bounce
+  eyelet.x += eyelet.vx;
+  eyelet.y += eyelet.vy;
+  const m = EYELET_R + 20;
+  if (eyelet.x < m || eyelet.x > W - m) eyelet.vx *= -1;
+  if (eyelet.y < m || eyelet.y > H - m) eyelet.vy *= -1;
+  // Gentle random nudge
+  if (Math.random() < 0.01) {
+    eyelet.vx += (Math.random() - 0.5) * 0.15;
+    eyelet.vy += (Math.random() - 0.5) * 0.15;
+    const speed = Math.sqrt(eyelet.vx ** 2 + eyelet.vy ** 2);
+    const maxSpeed = 1.2;
+    if (speed > maxSpeed) {
+      eyelet.vx = eyelet.vx / speed * maxSpeed;
+      eyelet.vy = eyelet.vy / speed * maxSpeed;
+    }
+  }
+
+  // Trail
+  const dx = mouse.x - trail[0]?.x;
+  const dy = mouse.y - trail[0]?.y;
+  if (trail.length === 0 || (dx * dx + dy * dy > 1)) {
+    trail.unshift({ x: mouse.x, y: mouse.y });
+    if (trail.length > THREAD_MAX) trail.length = THREAD_MAX;
+  }
+
+  // Hit test
+  const ex = mouse.x - eyelet.x;
+  const ey = mouse.y - eyelet.y;
+  if (ex * ex + ey * ey < EYELET_R * EYELET_R) {
+    score++;
+    hud.textContent = score;
+    spawnEyelet();
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Thread trail
+  if (trail.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) {
+      ctx.lineTo(trail[i].x, trail[i].y);
+    }
+    ctx.strokeStyle = 'rgba(160, 208, 255, 0.15)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Brighter near the needle
+    const near = Math.min(80, trail.length);
+    ctx.beginPath();
+    ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < near; i++) {
+      ctx.lineTo(trail[i].x, trail[i].y);
+    }
+    ctx.strokeStyle = 'rgba(160, 208, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // Eyelet — a ring
+  if (eyelet) {
+    const pulse = 1 + Math.sin(Date.now() * 0.003) * 0.08;
+    const r = EYELET_R * pulse;
+    ctx.beginPath();
+    ctx.arc(eyelet.x, eyelet.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(180, 220, 255, 0.6)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Inner glow
+    const g = ctx.createRadialGradient(eyelet.x, eyelet.y, 0, eyelet.x, eyelet.y, r);
+    g.addColorStop(0, 'rgba(160, 208, 255, 0.08)');
+    g.addColorStop(1, 'rgba(160, 208, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(eyelet.x, eyelet.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Needle
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, NEEDLE_R, 0, Math.PI * 2);
+  ctx.fillStyle = '#c8e0ff';
+  ctx.fill();
+
+  // Needle glow
+  const ng = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 18);
+  ng.addColorStop(0, 'rgba(200, 224, 255, 0.25)');
+  ng.addColorStop(1, 'rgba(200, 224, 255, 0)');
+  ctx.fillStyle = ng;
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, 18, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>breath</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0808; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+canvas { display: block; }
+#hint { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); color: #fff; font: 12px monospace; opacity: 0.3; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="hint">A — left breath &nbsp;·&nbsp; L — right breath &nbsp;·&nbsp; alternate to keep the flame</div>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H;
+function resize() { W = c.width = innerWidth; H = c.height = innerHeight; }
+resize();
+addEventListener('resize', resize);
+
+// The flame: a vertical ellipse that breathes
+let flameH = 100;
+let flameW = 30;
+let alive = true;
+let warmth = 0.5;
+
+// Timing: last press for each side, and the gap between them
+let lastA = 0;
+let lastL = 0;
+let lastSide = null; // 'a' or 'l'
+let gaps = []; // recent gaps between alternating presses
+
+const MAX_GAP = 2500; // ms — if you wait too long, flame dies
+const IDEAL_GAP = 600; // ms — sweet spot
+
+function press(side) {
+  if (!alive) { reset(); return; }
+  const now = performance.now();
+  if (lastSide === side) return; // must alternate
+
+  if (lastSide !== null) {
+    const gap = now - (side === 'a' ? lastL : lastA);
+    gaps.push(gap);
+    if (gaps.length > 10) gaps.shift();
+
+    // If gap too long, flame gets cold
+    if (gap > MAX_GAP) {
+      warmth = Math.max(0, warmth - 0.3);
+    }
+    // If gap is close to ideal, flame gets warm
+    const diff = Math.abs(gap - IDEAL_GAP);
+    if (diff < 200) {
+      warmth = Math.min(1, warmth + 0.08);
+    } else if (diff < 500) {
+      warmth = Math.min(1, warmth + 0.03);
+    }
+  }
+
+  lastSide = side;
+  if (side === 'a') lastA = now;
+  else lastL = now;
+
+  // Quick pulse on press
+  flameH += 15;
+}
+
+addEventListener('keydown', e => {
+  if (e.key === 'a' || e.key === 'A') press('a');
+  if (e.key === 'l' || e.key === 'L') press('l');
+});
+
+// Also mouse: left click = a, right click = l
+c.addEventListener('mousedown', e => {
+  if (e.button === 0) press('a');
+  if (e.button === 2) press('l');
+});
+c.addEventListener('contextmenu', e => e.preventDefault());
+
+function reset() {
+  alive = true;
+  warmth = 0.3;
+  lastSide = null;
+  gaps = [];
+  flameH = 80;
+}
+
+function update() {
+  if (!alive) return;
+  // Flame slowly decays
+  warmth = Math.max(0, warmth - 0.002);
+  if (warmth <= 0.01) alive = false;
+
+  // Flame size follows warmth
+  const targetH = 40 + warmth * 180;
+  const targetW = 15 + warmth * 30;
+  flameH += (targetH - flameH) * 0.06;
+  flameW += (targetW - flameW) * 0.06;
+}
+
+function draw() {
+  ctx.fillStyle = '#0a0808';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2;
+  const cy = H / 2 + 40;
+
+  if (!alive) {
+    // Smoke
+    ctx.font = '14px monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.textAlign = 'center';
+    ctx.fillText('it went out. press any key.', cx, cy - 60);
+    ctx.textAlign = 'left';
+    // Faint ember
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,100,50,0.3)';
+    ctx.fill();
+    return;
+  }
+
+  // Glow
+  const rad = flameH * 1.5;
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+  const alpha = warmth * 0.2;
+  grad.addColorStop(0, `rgba(255, 180, 80, ${alpha})`);
+  grad.addColorStop(1, 'rgba(255, 180, 80, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Flame body — layered ellipses for a soft flame look
+  const layers = [
+    { scale: 1.0, color: `rgba(255, 120, 30, ${0.3 + warmth * 0.3})` },
+    { scale: 0.7, color: `rgba(255, 180, 60, ${0.4 + warmth * 0.3})` },
+    { scale: 0.4, color: `rgba(255, 240, 180, ${0.5 + warmth * 0.4})` },
+  ];
+
+  // Wobble
+  const t = performance.now() / 300;
+  const wobble = Math.sin(t) * flameW * 0.15 + Math.sin(t * 1.7) * flameW * 0.08;
+
+  for (const layer of layers) {
+    const h = flameH * layer.scale;
+    const w = (flameW + wobble) * layer.scale;
+    ctx.beginPath();
+    ctx.ellipse(cx + wobble * 0.3, cy - h * 0.3, w, h, 0, 0, Math.PI * 2);
+    ctx.fillStyle = layer.color;
+    ctx.fill();
+  }
+
+  // Warmth bar — thin, at bottom
+  const barW = W * 0.2;
+  const barX = (W - barW) / 2;
+  const barY = H - 40;
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(barX, barY, barW, 2);
+  ctx.fillStyle = warmth > 0.5 ? 'rgba(255,200,100,0.6)' : 'rgba(255,100,50,0.4)';
+  ctx.fillRect(barX, barY, barW * warmth, 2);
+
+  // Timing hint — show the last gap
+  if (gaps.length > 0) {
+    const last = gaps[gaps.length - 1];
+    const quality = Math.abs(last - IDEAL_GAP);
+    let text, color;
+    if (quality < 200) { text = 'together'; color = 'rgba(255,220,150,0.5)'; }
+    else if (quality < 500) { text = 'close'; color = 'rgba(255,255,255,0.25)'; }
+    else { text = 'apart'; color = 'rgba(255,100,80,0.3)'; }
+    ctx.font = '12px monospace';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.fillText(text, cx, cy + 80);
+    ctx.textAlign = 'left';
+  }
+}
+
+addEventListener('keydown', e => {
+  if (!alive && (e.key === 'a' || e.key === 'A' || e.key === 'l' || e.key === 'L')) reset();
+});
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>sparks</title>
+<style>
+  html, body { margin:0; height:100%; background:#08080a; overflow:hidden; }
+  canvas { display:block; }
+  .hint {
+    position:fixed; bottom:18px; left:0; right:0;
+    text-align:center; color:rgba(255,255,255,.22);
+    font:12px/1 -apple-system, system-ui, sans-serif;
+    letter-spacing:.12em; text-transform:lowercase;
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">no goal, just the sparks</div>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W, H;
+function resize(){
+  W = cv.width = innerWidth;
+  H = cv.height = innerHeight;
+}
+addEventListener('resize', resize); resize();
+
+const sparks = [];
+const MAX = 70;
+
+function make(fresh){
+  const y = fresh ? H * (0.72 + Math.random() * 0.3) : Math.random() * H;
+  return {
+    x: Math.random() * W,
+    y: y,
+    vy: 10 + Math.random() * 22,
+    wAmp: 8 + Math.random() * 20,
+    wFreq: 0.0004 + Math.random() * 0.0009,
+    wPh: Math.random() * Math.PI * 2,
+    size: 0.7 + Math.random() * 1.6,
+    hue: 18 + Math.random() * 30,
+    life: 0,
+    maxLife: 4000 + Math.random() * 6000,
+  };
+}
+
+for (let i = 0; i < MAX; i++) sparks.push(make(false));
+
+let last = performance.now();
+
+function frame(now){
+  const dt = Math.min(40, now - last); last = now;
+
+  ctx.fillStyle = 'rgba(8,8,10,0.30)';
+  ctx.fillRect(0, 0, W, H);
+
+  for (let i = 0; i < sparks.length; i++){
+    const s = sparks[i];
+    s.life += dt;
+    s.y -= (s.vy * dt) / 1000;
+    s.x += Math.sin(now * s.wFreq + s.wPh) * s.wAmp * (dt / 1000);
+    if (s.x < -20) s.x = W + 20;
+    if (s.x > W + 20) s.x = -20;
+    if (s.y < -30 || s.life > s.maxLife){ sparks[i] = make(true); continue; }
+
+    const p = s.life / s.maxLife;
+    const env = Math.min(1, p / 0.15) * Math.min(1, (1 - p) / 0.25);
+    const flick = 0.72 + 0.28 * Math.sin(now * 0.02 + s.wPh * 7) * Math.sin(now * 0.006 + s.wPh * 3);
+    const a = env * flick;
+    if (a <= 0) continue;
+
+    const r = s.size * (2.5 + env * 3);
+    const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
+    g.addColorStop(0, `hsla(${s.hue + 10}, 95%, 80%, ${0.85 * a})`);
+    g.addColorStop(0.35, `hsla(${s.hue}, 90%, 60%, ${0.30 * a})`);
+    g.addColorStop(1, `hsla(${s.hue}, 80%, 45%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

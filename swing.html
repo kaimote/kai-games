@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>swing</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #0a0c10; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud {
+    position: fixed; top: 1.8rem; left: 50%; transform: translateX(-50%);
+    text-align: center; pointer-events: none;
+  }
+  .time {
+    font: 600 2.2rem system-ui; color: rgba(255,220,170,0.92);
+    letter-spacing: 0.03em; line-height: 1;
+  }
+  .label {
+    font: 300 0.7rem system-ui; color: rgba(255,255,255,0.28);
+    letter-spacing: 0.24em; text-transform: uppercase; margin-top: 0.55rem;
+  }
+  .hint {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.28); font: 300 13px system-ui;
+    letter-spacing: 0.04em; pointer-events: none; transition: opacity 1.5s;
+  }
+  .over {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    font: 300 0.85rem system-ui; letter-spacing: 0.28em; text-transform: uppercase;
+    color: rgba(255,255,255,0.25); opacity: 0; transition: opacity 0.5s; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud">
+  <div class="time" id="time">0.0s</div>
+  <div class="label">held</div>
+</div>
+<div class="hint" id="hint">push ← / → or tap left / right to keep it swinging</div>
+<div class="over" id="over">settled · tap to try again</div>
+
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const timeEl  = document.getElementById('time');
+const hintEl  = document.getElementById('hint');
+const overEl  = document.getElementById('over');
+
+let W, H, dpr, pivot, L, bobR;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  c.width = W * dpr; c.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pivot = { x: W / 2, y: H * 0.15 };
+  L     = Math.min(W, H) * 0.44;
+  bobR  = Math.max(14, Math.min(22, W * 0.02));
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── tuning ──────────────────────────────────────────────
+// Amplitude model (bounded, no runaway):
+//   A decays:  dA/dt = -(base + ramp·t) · A     ← gets harder the longer you last
+//   tap:       A = min(A_MAX, A + kick)
+//   die:       A < KEEL
+//   visual:    θ = A·cos(phase),  phase += √(g/L)·dt
+const A_MAX  = 1.40;   // max swing angle (rad) ≈ 80°
+const KEEL   = 0.30;   // die below this (rad) ≈ 17°
+const KICK   = 0.55;   // amplitude added per tap (rad)
+const BASE   = 0.30;   // base decay rate
+const RAMP   = 0.010;  // difficulty ramp per second
+// ────────────────────────────────────────────────────────
+
+let A, phase, t, alive, hinted;
+
+function reset() {
+  A = 1.0; phase = 0; t = 0; alive = true; hinted = false;
+  timeEl.textContent = '0.0s';
+  overEl.style.opacity = '0';
+}
+reset();
+
+function dropHint() { if (!hinted) { hinted = true; hintEl.style.opacity = '0'; } }
+
+function tap() {
+  dropHint();
+  if (!alive) { reset(); return; }
+  A = Math.min(A_MAX, A + KICK);
+}
+
+window.addEventListener('keydown', e => {
+  if (['ArrowLeft','ArrowRight','a','d',' '].includes(e.key) ||
+      ['a','d'].includes(e.key.toLowerCase())) { tap(); e.preventDefault(); }
+});
+c.addEventListener('pointerdown', tap);
+
+const OMEGA = Math.sqrt(9.81 / 1.0); // visual angular speed (rad/s), ~1s half-period
+const STEP  = 1 / 120;               // fixed physics step (s)
+let last = performance.now(), acc = 0;
+
+function physics(dt) {
+  if (!alive) return;
+  t += dt;
+  const damp = BASE + RAMP * t;
+  A -= damp * A * dt;
+  if (A < KEEL) {
+    alive = false;
+    overEl.style.opacity = '1';
+  }
+  phase += OMEGA * dt;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  const amp = Math.max(0, A);
+  const bx = pivot.x + Math.sin(amp * Math.cos(phase)) * L;
+  const by = pivot.y + Math.cos(amp * Math.cos(phase)) * L;
+
+  // warmth: 0 at keel → 1 at full swing
+  const heat = Math.max(0, Math.min(1, (amp - KEEL) / (A_MAX - KEEL)));
+
+  // keel arc
+  ctx.save();
+  ctx.translate(pivot.x, pivot.y);
+  ctx.strokeStyle = `rgba(255,255,255,${0.07 + heat * 0.10})`;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 9]);
+  ctx.beginPath();
+  ctx.arc(0, 0, L, Math.PI / 2 - KEEL, Math.PI / 2 + KEEL);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // rod
+  const hue = 220 - heat * 180;
+  const sat = 55 + heat * 35;
+  const lit = 55 + heat * 13;
+
+  ctx.strokeStyle = `hsla(${hue},${sat}%,${lit}%,0.45)`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(pivot.x, pivot.y);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+
+  // pivot
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.arc(pivot.x, pivot.y, 4, 0, Math.PI * 2); ctx.fill();
+
+  // bob glow
+  const gr = ctx.createRadialGradient(bx, by, 0, bx, by, bobR * (3 + heat * 4));
+  gr.addColorStop(0, `hsla(${hue},${sat}%,${lit}%,${0.18 + heat * 0.28})`);
+  gr.addColorStop(1, 'transparent');
+  ctx.fillStyle = gr;
+  ctx.beginPath(); ctx.arc(bx, by, bobR * (3 + heat * 4), 0, Math.PI * 2); ctx.fill();
+
+  // bob
+  ctx.fillStyle = `hsl(${hue},${sat}%,${lit}%)`;
+  ctx.beginPath(); ctx.arc(bx, by, bobR, 0, Math.PI * 2); ctx.fill();
+
+  if (alive) timeEl.textContent = t.toFixed(1) + 's';
+}
+
+function loop(now) {
+  acc += (now - last) / 1000; last = now;
+  if (acc > 0.25) acc = 0.25;
+  while (acc >= STEP) { physics(STEP); acc -= STEP; }
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

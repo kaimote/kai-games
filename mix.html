@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>mix</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #121014; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; font-family: monospace; }
+#msg { color: rgba(255,255,255,0.4); font-size: 13px; margin-bottom: 24px; }
+#jars { display: flex; gap: 24px; margin-bottom: 20px; }
+.jar {
+  width: 80px; height: 100px; border-radius: 8px 8px 12px 12px;
+  border: 2px solid rgba(255,255,255,0.15); cursor: pointer;
+  position: relative; overflow: hidden; transition: border-color 0.2s;
+}
+.jar:hover { border-color: rgba(255,255,255,0.4); }
+.jar .fill {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  transition: height 0.4s ease, background 0.4s ease;
+}
+.jar .label {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; color: rgba(255,255,255,0.7); pointer-events: none;
+}
+#result {
+  margin-top: 16px; font-size: 14px; color: rgba(255,255,255,0.5);
+  min-height: 20px;
+}
+#reset {
+  margin-top: 16px; background: none; border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.5); padding: 6px 16px; border-radius: 4px;
+  cursor: pointer; font-family: monospace; font-size: 12px;
+}
+#reset:hover { border-color: rgba(255,255,255,0.5); color: #fff; }
+#target {
+  margin-top: 12px; display: flex; align-items: center; gap: 8px;
+  color: rgba(255,255,255,0.4); font-size: 12px;
+}
+#target .swatch {
+  width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.2);
+}
+</style>
+</head>
+<body>
+<div id="msg">click two jars to pour between them · match the target</div>
+<div id="target">target: <span class="swatch" id="tswatch"></span> <span id="tname"></span></div>
+<div id="jars"></div>
+<div id="result"></div>
+<button id="reset">new mix</button>
+<script>
+// Color mixing: simple weighted average in RGB
+const COLORS = [
+  { name: 'rose',   r: 220, g: 120, b: 140 },
+  { name: 'gold',   r: 230, g: 180, b: 80  },
+  { name: 'blue',   r: 100, g: 140, b: 220 },
+  { name: 'plum',   r: 180, g: 100, b: 180 },
+];
+
+let jars = [];
+let target = null;
+let selected = null;
+
+function randColor() { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+
+function newGame() {
+  // Create 4 jars with random colors
+  jars = [randColor(), randColor(), randColor(), randColor()];
+  // Ensure not all same
+  if (jars.every(j => j.name === jars[0].name)) jars[1] = randColor();
+
+  // Target = mix of two jars
+  const i = Math.floor(Math.random() * 4);
+  let j = Math.floor(Math.random() * 4);
+  if (j === i) j = (i + 1) % 4;
+  target = {
+    r: Math.round((jars[i].r + jars[j].r) / 2),
+    g: Math.round((jars[i].g + jars[j].g) / 2),
+    b: Math.round((jars[i].b + jars[j].b) / 2),
+    from: i, to: j
+  };
+
+  document.getElementById('tswatch').style.background = rgb(target);
+  document.getElementById('tname').textContent = `${jars[i].name} + ${jars[j].name}`;
+  document.getElementById('result').textContent = '';
+  selected = null;
+  render();
+}
+
+function rgb(c) { return `rgb(${c.r},${c.g},${c.b})`; }
+
+function render() {
+  const container = document.getElementById('jars');
+  container.innerHTML = '';
+  jars.forEach((j, idx) => {
+    const div = document.createElement('div');
+    div.className = 'jar';
+    if (selected === idx) div.style.borderColor = 'rgba(255,220,150,0.7)';
+    const fill = document.createElement('div');
+    fill.className = 'fill';
+    fill.style.height = '70%';
+    fill.style.background = rgb(j);
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = j.name;
+    div.appendChild(fill);
+    div.appendChild(label);
+    div.onclick = () => clickJar(idx);
+    container.appendChild(div);
+  });
+}
+
+function clickJar(idx) {
+  if (selected === null) {
+    selected = idx;
+    render();
+    return;
+  }
+  if (selected === idx) {
+    selected = null;
+    render();
+    return;
+  }
+  // Pour: average the two colors
+  const a = jars[selected];
+  const b = jars[idx];
+  const mix = {
+    r: Math.round((a.r + b.r) / 2),
+    g: Math.round((a.g + b.g) / 2),
+    b: Math.round((a.b + b.b) / 2),
+    name: `${a.name.slice(0,2)}·${b.name.slice(0,2)}`
+  };
+  jars[selected] = mix;
+  jars[idx] = { ...mix, name: `${b.name.slice(0,2)}·${a.name.slice(0,2)}` };
+  selected = null;
+
+  // Check if either jar now matches target
+  for (const j of jars) {
+    const d = Math.abs(j.r - target.r) + Math.abs(j.g - target.g) + Math.abs(j.b - target.b);
+    if (d < 30) {
+      document.getElementById('result').textContent = `warm. that's it.`;
+      document.getElementById('result').style.color = 'rgba(255,210,150,0.8)';
+      return;
+    }
+  }
+  document.getElementById('result').textContent = 'not quite...';
+  document.getElementById('result').style.color = 'rgba(255,255,255,0.3)';
+  render();
+}
+
+document.getElementById('reset').onclick = newGame;
+newGame();
+</script>
+</body>
+</html>

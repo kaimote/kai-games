@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>drift</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+canvas { display: block; }
+#msg { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); color: #fff; font: 14px monospace; opacity: 0.5; }
+</style>
+</head>
+<body>
+<div id="msg">move with mouse. stay in the ring.</div>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H, cx, cy;
+
+function resize() {
+  W = c.width = window.innerWidth;
+  H = c.height = window.innerHeight;
+  cx = W / 2; cy = H / 2;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// The ring
+let ringR = Math.min(W, H) * 0.25;
+let ringX = cx, ringY = cy;
+let ringVX = 0, ringVY = 0;
+
+// The player (just a dot)
+let px = cx, py = cy;
+
+// Trail
+let trail = [];
+
+let score = 0;
+let best = 0;
+let alive = true;
+
+let mouse = { x: cx, y: cy };
+document.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+// Ring drifts slowly, gets faster over time
+let speed = 0.3;
+
+function loop() {
+  // Ring wanders
+  ringVX += (Math.random() - 0.5) * 0.15;
+  ringVY += (Math.random() - 0.5) * 0.15;
+  // Slight pull toward center so it doesn't fly off
+  ringVX += (cx - ringX) * 0.0003;
+  ringVY += (cy - ringY) * 0.0003;
+  // Damping
+  ringVX *= 0.995;
+  ringVY *= 0.995;
+  ringX += ringVX * speed;
+  ringY += ringVY * speed;
+
+  // Ring radius slowly shrinks
+  ringR = Math.max(30, ringR * 0.9997);
+
+  // Player follows mouse with slight lag (feels alive)
+  px += (mouse.x - px) * 0.12;
+  py += (mouse.y - py) * 0.12;
+
+  // Trail
+  trail.push({ x: px, y: py, a: 1 });
+  if (trail.length > 80) trail.shift();
+
+  // Score
+  if (alive) {
+    score++;
+    if (score > best) best = score;
+    // Check: is player inside the ring?
+    const dx = px - ringX;
+    const dy = py - ringY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist > ringR) {
+      alive = false;
+      setTimeout(() => { alive = true; score = 0; trail = []; }, 800);
+    }
+  }
+
+  // Draw
+  ctx.fillStyle = 'rgba(10,10,15,0.25)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Trail
+  for (let i = 0; i < trail.length; i++) {
+    const t = trail[i];
+    const alpha = (i / trail.length) * 0.6;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 2, 0, Math.PI * 2);
+    ctx.fillStyle = alive ? `rgba(180,220,255,${alpha})` : `rgba(255,120,100,${alpha})`;
+    ctx.fill();
+  }
+
+  // Ring
+  ctx.beginPath();
+  ctx.arc(ringX, ringY, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = alive ? 'rgba(255,255,255,0.6)' : 'rgba(255,80,60,0.8)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Player dot
+  ctx.beginPath();
+  ctx.arc(px, py, 5, 0, Math.PI * 2);
+  ctx.fillStyle = alive ? '#fff' : '#ff6644';
+  ctx.fill();
+
+  // Score
+  ctx.font = '13px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.fillText(`${score}`, 20, 30);
+  ctx.fillText(`best ${best}`, 20, 48);
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

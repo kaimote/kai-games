@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>keep</title>
+<style>
+  html, body { margin:0; height:100%; background:#0b0c10; overflow:hidden; cursor:none; }
+  canvas { display:block; }
+  .hint {
+    position:fixed; bottom:18px; left:0; right:0;
+    text-align:center; color:rgba(255,255,255,.28);
+    font:12px/1 -apple-system, system-ui, sans-serif;
+    letter-spacing:.12em; text-transform:lowercase;
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">drift toward them to keep them</div>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W, H;
+function resize(){
+  W = cv.width = innerWidth;
+  H = cv.height = innerHeight;
+}
+addEventListener('resize', resize); resize();
+
+const mouse = { x: -9999, y: -9999 };
+addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+addEventListener('mouseleave', () => { mouse.x = -9999; mouse.y = -9999; });
+addEventListener('touchmove', e => {
+  const t = e.touches[0]; mouse.x = t.clientX; mouse.y = t.clientY;
+}, {passive:true});
+addEventListener('touchend', () => { mouse.x = -9999; mouse.y = -9999; });
+
+const lights = [];
+const traces = [];
+
+const MAX_LIGHTS = 6;
+const LIGHT_LIFE = 5000;
+const KEEP_RADIUS = 130;
+const KEEP_FACTOR = 0.35;
+const TRACE_LIFE = 9000;
+const SPAWN_INTERVAL = 2600;
+
+let lastSpawn = 0;
+let last = performance.now();
+
+function spawn(now){
+  lights.push({
+    x: 60 + Math.random() * (W - 120),
+    y: 60 + Math.random() * (H - 120),
+    life: LIGHT_LIFE * (0.85 + Math.random() * 0.3),
+    hue: 35 + Math.random() * 15,
+    size: 3 + Math.random() * 2,
+  });
+}
+
+function frame(now){
+  const dt = now - last; last = now;
+
+  ctx.fillStyle = 'rgba(11,12,16,0.28)';
+  ctx.fillRect(0, 0, W, H);
+
+  if (now - lastSpawn > SPAWN_INTERVAL && lights.length < MAX_LIGHTS){
+    spawn(now); lastSpawn = now;
+  }
+
+  for (let i = lights.length - 1; i >= 0; i--){
+    const L = lights[i];
+    const d = Math.hypot(mouse.x - L.x, mouse.y - L.y);
+    const kept = d < KEEP_RADIUS;
+    const effDt = kept ? dt * KEEP_FACTOR : dt;
+    L.life -= effDt;
+    if (L.life <= 0){
+      traces.push({ x:L.x, y:L.y, born:now, hue:L.hue, size:L.size });
+      lights.splice(i, 1);
+      continue;
+    }
+    const t = Math.max(0, L.life / (LIGHT_LIFE * 1.15));
+    const r = (L.size + 14) * (0.6 + 0.4 * t);
+    const g = ctx.createRadialGradient(L.x, L.y, 0, L.x, L.y, r);
+    g.addColorStop(0, `hsla(${L.hue}, 90%, 72%, ${0.85 * t})`);
+    g.addColorStop(0.5, `hsla(${L.hue}, 80%, 55%, ${0.35 * t})`);
+    g.addColorStop(1, `hsla(${L.hue}, 70%, 40%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(L.x, L.y, r, 0, Math.PI*2);
+    ctx.fill();
+
+    if (kept){
+      ctx.strokeStyle = `hsla(${L.hue}, 80%, 70%, ${0.15 * t})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(L.x, L.y, r + 8, 0, Math.PI*2);
+      ctx.stroke();
+    }
+  }
+
+  for (let i = traces.length - 1; i >= 0; i--){
+    const T = traces[i];
+    const age = now - T.born;
+    if (age > TRACE_LIFE){ traces.splice(i, 1); continue; }
+    const t = 1 - age / TRACE_LIFE;
+    ctx.fillStyle = `hsla(${T.hue}, 60%, 55%, ${0.10 * t})`;
+    ctx.beginPath();
+    ctx.arc(T.x, T.y, T.size + 4, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  if (mouse.x > -999){
+    const g = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 22);
+    g.addColorStop(0, 'rgba(255, 210, 160, 0.5)');
+    g.addColorStop(1, 'rgba(255, 210, 160, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, 22, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

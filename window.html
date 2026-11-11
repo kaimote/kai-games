@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>window</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0c12;overflow:hidden;cursor:none}
+  canvas{display:block}
+  .hint{position:fixed;bottom:18px;left:0;right:0;text-align:center;
+        color:rgba(255,255,255,.22);font:12px/1 -apple-system,system-ui,sans-serif;
+        letter-spacing:.12em;text-transform:lowercase;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">look out</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+let W,H;
+function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight}
+addEventListener('resize',resize);resize();
+
+const mouse={x:-9999,y:-9999,trail:[]};
+addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+addEventListener('mouseleave',()=>{mouse.x=-9999;mouse.y=-9999});
+addEventListener('touchmove',e=>{const t=e.touches[0];mouse.x=t.clientX;mouse.y=t.clientY},{passive:true});
+addEventListener('touchend',()=>{mouse.x=-9999;mouse.y=-9999});
+
+// Clouds — slow drift across the "outside"
+const clouds=[];
+for(let i=0;i<5;i++){
+  clouds.push({
+    x:Math.random()*W,
+    y:H*0.08+Math.random()*H*0.38,
+    w:120+Math.random()*180,
+    h:18+Math.random()*14,
+    speed:0.08+Math.random()*0.12,
+    alpha:0.10+Math.random()*0.14,
+  });
+}
+
+// Moon
+const moon={x:W*0.72,y:H*0.16,r:22};
+
+let last=performance.now();
+
+function drawMoon(){
+  const g=ctx.createRadialGradient(moon.x,moon.y,0,moon.x,moon.y,moon.r*3);
+  g.addColorStop(0,'rgba(220,225,245,0.85)');
+  g.addColorStop(0.35,'rgba(180,190,220,0.30)');
+  g.addColorStop(1,'rgba(140,150,180,0)');
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.arc(moon.x,moon.y,moon.r*3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='rgba(235,238,250,0.9)';
+  ctx.beginPath();ctx.arc(moon.x,moon.y,moon.r,0,Math.PI*2);ctx.fill();
+}
+
+function drawClouds(dt){
+  for(const c of clouds){
+    c.x+=c.speed;
+    if(c.x>W+c.w) c.x=-c.w;
+    const g=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,c.w);
+    g.addColorStop(0,`rgba(140,150,175,${c.alpha})`);
+    g.addColorStop(1,'rgba(140,150,175,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.ellipse(c.x,c.y,c.w,c.h,0,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// Frame / window border
+function drawFrame(){
+  const b=Math.min(W,H)*0.055;
+  ctx.strokeStyle='rgba(60,55,50,0.7)';
+  ctx.lineWidth=b;
+  ctx.strokeRect(b/2,b/2,W-b,H-b);
+  // Cross bars
+  ctx.lineWidth=b*0.38;
+  ctx.beginPath();ctx.moveTo(W/2,b);ctx.lineTo(W/2,H-b);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(b,H/2);ctx.lineTo(W-b,H/2);ctx.stroke();
+}
+
+function frame(now){
+  const dt=now-last;last=now;
+
+  // Night sky background
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#0a0e18');
+  sky.addColorStop(1,'#0f1220');
+  ctx.fillStyle=sky;
+  ctx.fillRect(0,0,W,H);
+
+  drawClouds(dt);
+  drawMoon();
+
+  // Warm trail — breath on the glass
+  if(mouse.x>-999){
+    mouse.trail.push({x:mouse.x,y:mouse.y,age:0});
+  }
+  for(let i=mouse.trail.length-1;i>=0;i--){
+    const p=mouse.trail[i];
+    p.age+=dt;
+    if(p.age>1800){mouse.trail.splice(i,1);continue}
+    const t=1-p.age/1800;
+    const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,30);
+    g.addColorStop(0,`rgba(255,220,170,${0.18*t})`);
+    g.addColorStop(1,'rgba(255,220,170,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(p.x,p.y,30,0,Math.PI*2);ctx.fill();
+  }
+
+  // Cursor warm point
+  if(mouse.x>-999){
+    const g=ctx.createRadialGradient(mouse.x,mouse.y,0,mouse.x,mouse.y,18);
+    g.addColorStop(0,'rgba(255,215,165,0.55)');
+    g.addColorStop(1,'rgba(255,215,165,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,18,0,Math.PI*2);ctx.fill();
+  }
+
+  drawFrame();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<title>smooth</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a12;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+  }
+  canvas { display: block; cursor: crosshair; }
+  #hud {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(200,220,255,0.6);
+    font-size: 13px;
+    letter-spacing: 2px;
+  }
+  #score {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    color: rgba(200,220,255,0.8);
+    font-size: 22px;
+    letter-spacing: 3px;
+    display: none;
+    text-align: center;
+  }
+  #score .label { font-size: 11px; opacity: 0.5; margin-top: 8px; letter-spacing: 1px; }
+  #hint {
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(200,220,255,0.3);
+    font-size: 11px;
+    letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+<div id="hud">draw from ○ to ○</div>
+<canvas id="c"></canvas>
+<div id="score"><div id="score-val"></div><div class="label">click to draw again</div></div>
+<div id="hint">one clean line. that's the whole game.</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('hud');
+const scoreEl = document.getElementById('score');
+const scoreVal = document.getElementById('score-val');
+const hint = document.getElementById('hint');
+
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+let phase = 'idle'; // idle | drawing | done
+let dotA = { x: 0, y: 0 };
+let dotB = { x: 0, y: 0 };
+let trail = [];
+let isDown = false;
+
+function placeDots() {
+  const margin = 120;
+  const w = W - margin * 2;
+  const h = H - margin * 2;
+  // Two random points, not too close, not too far
+  let attempts = 0;
+  while (attempts < 100) {
+    dotA = { x: margin + Math.random() * w, y: margin + Math.random() * h };
+    dotB = { x: margin + Math.random() * w, y: margin + Math.random() * h };
+    const d = Math.sqrt((dotB.x - dotA.x) ** 2 + (dotB.y - dotA.y) ** 2);
+    if (d > 200 && d < Math.min(w, h) * 0.8) break;
+    attempts++;
+  }
+}
+
+function reset() {
+  trail = [];
+  phase = 'idle';
+  scoreEl.style.display = 'none';
+  hud.style.opacity = '1';
+  placeDots();
+}
+
+function distToLine(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2);
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+}
+
+function finishLine() {
+  if (trail.length < 5) { reset(); return; }
+
+  // Measure: mean distance from ideal line + max deviation
+  let totalDev = 0, maxDev = 0;
+  for (const p of trail) {
+    const d = distToLine(p.x, p.y, dotA.x, dotA.y, dotB.x, dotB.y);
+    totalDev += d;
+    if (d > maxDev) maxDev = d;
+  }
+  const meanDev = totalDev / trail.length;
+
+  // Score: 0-100, lower deviation = higher score
+  const score = Math.max(0, Math.round(100 - meanDev * 2 - maxDev * 0.5));
+  const label = score >= 90 ? 'so smooth' : score >= 70 ? 'clean' : score >= 40 ? 'a little wobble' : 'the hand was honest';
+
+  phase = 'done';
+  scoreVal.textContent = score + ' — ' + label;
+  scoreEl.style.display = 'block';
+  hud.style.opacity = '0';
+  setTimeout(() => hint.style.opacity = '0.15', 500);
+}
+
+window.addEventListener('mousedown', e => {
+  if (phase === 'done') { reset(); return; }
+  if (phase === 'idle') {
+    // Check if near dotA
+    const d = Math.sqrt((e.clientX - dotA.x) ** 2 + (e.clientY - dotA.y) ** 2);
+    if (d < 30) {
+      phase = 'drawing';
+      isDown = true;
+      trail = [{ x: dotA.x, y: dotA.y }];
+    }
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (phase !== 'drawing' || !isDown) return;
+  const last = trail[trail.length - 1];
+  if (last && Math.sqrt((e.clientX - last.x) ** 2 + (e.clientY - last.y) ** 2) > 2) {
+    trail.push({ x: e.clientX, y: e.clientY });
+  }
+  // Check if we reached dotB
+  const d = Math.sqrt((e.clientX - dotB.x) ** 2 + (e.clientY - dotB.y) ** 2);
+  if (d < 25) {
+    trail.push({ x: dotB.x, y: dotB.y });
+    isDown = false;
+    finishLine();
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  if (phase === 'drawing') {
+    isDown = false;
+    finishLine();
+  }
+});
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Faint ideal line
+  if (phase !== 'done') {
+    ctx.beginPath();
+    ctx.moveTo(dotA.x, dotA.y);
+    ctx.lineTo(dotB.x, dotB.y);
+    ctx.strokeStyle = 'rgba(200,220,255,0.06)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 8]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Drawn trail
+  if (trail.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) {
+      ctx.lineTo(trail[i].x, trail[i].y);
+    }
+    ctx.strokeStyle = 'rgba(200,220,255,0.7)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Glow
+    ctx.beginPath();
+    ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) {
+      ctx.lineTo(trail[i].x, trail[i].y);
+    }
+    ctx.strokeStyle = 'rgba(200,220,255,0.1)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  }
+
+  // Dots
+  const pulse = 1 + Math.sin(Date.now() * 0.004) * 0.1;
+  for (const dot of [dotA, dotB]) {
+    const r = 8 * pulse;
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(200,220,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const g = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, r * 2);
+    g.addColorStop(0, 'rgba(200,220,255,0.1)');
+    g.addColorStop(1, 'rgba(200,220,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, r * 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+reset();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

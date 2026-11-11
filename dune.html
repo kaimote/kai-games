@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>dune</title>
+<style>
+  html,body{margin:0;height:100%;background:#07060a;overflow:hidden;touch-action:none;
+    font:-apple-system,system-ui,sans-serif}
+  canvas{display:block}
+  #hint{position:fixed;left:0;right:0;bottom:26px;text-align:center;color:#6a5a4a;
+    font-size:12px;letter-spacing:.18em;text-transform:uppercase;pointer-events:none;
+    transition:opacity 2.5s ease}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">drag to pile sand &middot; hold shift and drag to dig</div>
+<script>
+(() => {
+  const cv = document.getElementById('c'), cx = cv.getContext('2d');
+  const hint = document.getElementById('hint');
+  const DPR = Math.min(2, window.devicePixelRatio || 1);
+  const CELL = 2;                 // px per column
+  const REPOSE = 1.35;            // height difference a column can hold before it slides
+  let W = 0, H = 0, N = 0, h = new Float32Array(0), slope = new Float32Array(0);
+  let seed = 0;
+
+  function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W * DPR; cv.height = H * DPR;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const n = Math.max(64, Math.floor(W / CELL));
+    const nh = new Float32Array(n);
+    if (h.length === 0) {
+      seed = 7;
+      for (let i = 0; i < n; i++) {
+        const t = i / n;
+        nh[i] = H * 0.58
+          + Math.sin(t * 5.1 + 0.4) * H * 0.055
+          + Math.sin(t * 12.7 + 1.9) * H * 0.028
+          + (rnd() - 0.5) * 1.4;
+      }
+    } else {
+      nh.set(h.subarray(0, Math.min(n, h.length)));
+      for (let i = h.length; i < n; i++) nh[i] = h[Math.max(0, h.length - 1)];
+    }
+    h = nh; slope = new Float32Array(n); N = n;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function slide() {
+    for (let p = 0; p < 2; p++) {
+      for (let i = 0; i < N - 1; i++) {
+        const d = h[i] - h[i + 1];
+        if (d > REPOSE) { const m = (d - REPOSE) * 0.48; h[i] -= m; h[i + 1] += m; }
+      }
+      for (let i = N - 1; i > 0; i--) {
+        const d = h[i] - h[i - 1];
+        if (d > REPOSE) { const m = (d - REPOSE) * 0.48; h[i] -= m; h[i - 1] += m; }
+      }
+    }
+    for (let i = 1; i < N - 1; i++) {
+      slope[i] = Math.max(0, h[i] - 0.5 * (h[i - 1] + h[i + 1]));
+    }
+  }
+
+  function deposit(x, amount, radius) {
+    const c = Math.floor(x / CELL);
+    if (amount < 0) {                       // dig: never go below the floor
+      for (let k = -radius; k <= radius; k++) {
+        const i = c + k, w = 1 - Math.abs(k) / (radius + 1);
+        h[i] = Math.max(H * 0.9, h[i] + amount * w);
+      }
+      return;
+    }
+    for (let k = -radius; k <= radius; k++) {
+      const i = c + k;
+      if (i < 0 || i >= N) continue;
+      const w = 1 - Math.abs(k) / (radius + 1);
+      h[i] += amount * w;
+    }
+  }
+
+  window.__dune = { h: () => Array.from(h), n: () => N, cell: CELL,
+    add: (col, amt, r) => { for (let k = 0; k < Math.abs(amt); k++) deposit(col * CELL, Math.sign(amt), r || 8); },
+    counts: () => ({ down: pt.down, dig: pt.dig, x: pt.x, y: pt.y }) };
+
+  const pt = { x: 0, y: 0, down: false, dig: false, had: false };
+  function place(e) {
+    const t = e.touches ? e.touches[0] : e;
+    pt.x = t.clientX; pt.y = t.clientY; pt.had = true;
+    if (pt.down) deposit(pt.x, pt.dig ? -2.4 : 1.9, pt.dig ? 12 : 8);
+  }
+  const grab = e => { e.preventDefault(); pt.down = true; pt.dig = !!(e.shiftKey || (e.buttons & 2)); place(e);
+    hint.style.opacity = 0; };
+  cv.addEventListener('mousedown', grab);
+  cv.addEventListener('mousemove', place);
+  window.addEventListener('mouseup', () => pt.down = false);
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+  cv.addEventListener('touchstart', grab, { passive: false });
+  cv.addEventListener('touchmove', e => { e.preventDefault(); place(e); }, { passive: false });
+  window.addEventListener('touchend', () => pt.down = false);
+
+  const sky = () => {
+    const g = cx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#07060a'); g.addColorStop(0.6, '#120c12'); g.addColorStop(1, '#1a1013');
+    cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+  };
+
+  function frame() {
+    slide();
+    sky();
+
+    // the dune itself
+    cx.beginPath();
+    cx.moveTo(0, H);
+    for (let i = 0; i < N; i++) cx.lineTo(i * CELL, H - h[i]);
+    cx.lineTo(W, H); cx.closePath();
+    const g = cx.createLinearGradient(0, H * 0.35, 0, H);
+    g.addColorStop(0, '#8a5f36'); g.addColorStop(0.45, '#4d341f'); g.addColorStop(1, '#1b1210');
+    cx.fillStyle = g; cx.fill();
+
+    // lit crest, and faces that are currently sliding glow a little
+    cx.lineWidth = 1.1;
+    for (let i = 0; i < N; i++) {
+      const y = H - h[i], s = Math.min(1, slope[i] / 2.2);
+      cx.strokeStyle = 'rgba(255,214,158,' + (0.16 + s * 0.55).toFixed(3) + ')';
+      cx.beginPath();
+      cx.moveTo(i * CELL, y);
+      cx.lineTo(i * CELL + CELL, y);
+      cx.stroke();
+    }
+
+    // your hand, warm above the sand
+    if (pt.had) {
+      const r = pt.down ? 74 : 46;
+      const rg = cx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, r);
+      rg.addColorStop(0, pt.dig ? 'rgba(150,190,220,0.16)' : 'rgba(255,196,120,0.14)');
+      rg.addColorStop(1, 'rgba(255,196,120,0)');
+      cx.fillStyle = rg;
+      cx.beginPath(); cx.arc(pt.x, pt.y, r, 0, 6.2832); cx.fill();
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

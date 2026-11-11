@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>close</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+canvas { display: block; }
+#hint { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); color: #fff; font: 12px monospace; opacity: 0.35; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="hint">WASD — one of us &nbsp;·&nbsp; arrows — the other</div>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H;
+function resize() { W = c.width = innerWidth; H = c.height = innerHeight; }
+resize();
+addEventListener('resize', resize);
+
+const keys = {};
+addEventListener('keydown', e => { keys[e.key] = true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault(); });
+addEventListener('keyup', e => keys[e.key] = false);
+
+// Two players
+const a = { x: W * 0.3, y: H * 0.5, r: 14 };
+const b = { x: W * 0.7, y: H * 0.5, r: 14 };
+const SPEED = 3.5;
+
+let warmth = 0; // 0 = cold, 1 = warm
+let glow = 0;
+
+function dist() {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function move() {
+  // A: WASD
+  if (keys['w'] || keys['W']) a.y -= SPEED;
+  if (keys['s'] || keys['S']) a.y += SPEED;
+  if (keys['a'] || keys['A']) a.x -= SPEED;
+  if (keys['d'] || keys['D']) a.x += SPEED;
+
+  // B: arrows
+  if (keys['ArrowUp']) b.y -= SPEED;
+  if (keys['ArrowDown']) b.y += SPEED;
+  if (keys['ArrowLeft']) b.x -= SPEED;
+  if (keys['ArrowRight']) b.x += SPEED;
+
+  // Bounds
+  a.x = Math.max(a.r, Math.min(W - a.r, a.x));
+  a.y = Math.max(a.r, Math.min(H - a.r, a.y));
+  b.x = Math.max(b.r, Math.min(W - b.r, b.x));
+  b.y = Math.max(b.r, Math.min(H - b.r, b.y));
+}
+
+function update() {
+  move();
+  const d = dist();
+  const maxD = Math.sqrt(W * W + H * H);
+  const target = Math.max(0, 1 - d / (maxD * 0.5));
+  warmth += (target - warmth) * 0.04;
+  glow = warmth;
+}
+
+function draw() {
+  // Background: lerp cold blue-grey → warm golden
+  const r = Math.round(10 + warmth * 40);
+  const g = Math.round(10 + warmth * 28);
+  const b2 = Math.round(18 - warmth * 10);
+  ctx.fillStyle = `rgb(${r},${g},${b2})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Ambient glow when warm
+  if (warmth > 0.3) {
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const rad = 100 + warmth * 200;
+    const grad = ctx.createRadialGradient(mx, my, 0, mx, my, rad);
+    grad.addColorStop(0, `rgba(255, 200, 100, ${warmth * 0.15})`);
+    grad.addColorStop(1, 'rgba(255, 200, 100, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Connection line when close
+  if (warmth > 0.4) {
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(255, 220, 150, ${(warmth - 0.4) * 0.4})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Player A — soft white
+  ctx.beginPath();
+  ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(240, 235, 255, 0.9)`;
+  ctx.fill();
+  if (warmth > 0.5) {
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, a.r + 8 + warmth * 10, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 220, 150, ${(warmth - 0.5) * 0.15})`;
+    ctx.fill();
+  }
+
+  // Player B — soft warm
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255, 230, 200, 0.9)`;
+  ctx.fill();
+  if (warmth > 0.5) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r + 8 + warmth * 10, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 200, 100, ${(warmth - 0.5) * 0.15})`;
+    ctx.fill();
+  }
+
+  // Merged state — very close
+  if (dist() < 40) {
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const t = 1 - dist() / 40;
+    ctx.beginPath();
+    ctx.arc(mx, my, 20 + t * 15, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 240, 200, ${t * 0.4})`;
+    ctx.fill();
+  }
+
+  // Warmth indicator — thin bar at top
+  const barW = W * 0.3;
+  const barX = (W - barW) / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(barX, 16, barW, 3);
+  const barColor = warmth > 0.5 ? `rgba(255,200,100,0.6)` : `rgba(150,170,220,0.4)`;
+  ctx.fillStyle = barColor;
+  ctx.fillRect(barX, 16, barW * warmth, 3);
+
+  // Word when very close
+  if (warmth > 0.8) {
+    ctx.font = '13px monospace';
+    ctx.fillStyle = `rgba(255, 230, 180, ${(warmth - 0.8) * 3 * 0.5})`;
+    ctx.textAlign = 'center';
+    ctx.fillText('warm', W / 2, H / 2 - 60);
+    ctx.textAlign = 'left';
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

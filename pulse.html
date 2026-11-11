@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>pulse</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d1016;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#f0e8dc;}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none;}
+  #hud{position:fixed;top:16px;left:0;right:0;text-align:center;pointer-events:none;user-select:none;}
+  #combo{font-size:40px;font-weight:700;letter-spacing:1px;transition:transform .08s ease;}
+  #flash{font-size:14px;margin-top:4px;opacity:0;transition:opacity .1s ease;letter-spacing:2px;text-transform:uppercase;}
+  #hint{position:fixed;left:0;right:0;bottom:14%;text-align:center;pointer-events:none;user-select:none;font-size:13px;opacity:.55;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="combo">0</div>
+  <div id="flash"></div>
+</div>
+<div id="hint">tap when the dot is biggest &middot; space / click</div>
+<script>
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const comboEl=document.getElementById('combo'), flashEl=document.getElementById('flash'), hintEl=document.getElementById('hint');
+let W=0,H=0,dpr=1;
+function resize(){dpr=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);}
+addEventListener('resize',resize);resize();
+
+let t0=performance.now();
+let bpm=60;                 // tempo
+let combo=0;
+let hits=0;
+let started=false;
+// feedback pulse on each tap
+let feedback={t:-1,good:false,perfect:false};
+
+function period(){ return 60000/bpm; } // ms
+function phase(now){ return ((now - t0) % period()) / period(); } // 0 at the beat peak
+
+function tap(now){
+  if(!started){ started=true; hintEl.style.opacity=0; }
+  const p=phase(now);
+  // distance (in ms) to nearest peak (phase 0 / 1)
+  const off=Math.min(p,1-p)*period();
+  const perfect=off<55, good=off<120;
+  if(good){
+    combo += perfect?2:1;
+    hits++;
+    bpm=Math.min(120, 60+combo*2);
+    flash(p?'perfect':'good');
+  } else {
+    combo=0; bpm=60; flash('miss');
+  }
+  feedback={t:now,good,perfect};
+  comboEl.textContent=combo;
+  comboEl.style.transform='scale('+(1+ (perfect?0.25:0.14))+')';
+  setTimeout(()=>comboEl.style.transform='scale(1)',90);
+}
+function flash(w){
+  flashEl.textContent=w;
+  flashEl.style.color = w==='perfect'?'#ffe6a8': w==='good'?'#bfe8ff':'#ff9d8a';
+  flashEl.style.opacity=1;
+  setTimeout(()=>flashEl.style.opacity=0,260);
+}
+addEventListener('pointerdown', e=>{ tap(performance.now()); });
+addEventListener('keydown', e=>{ if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); tap(performance.now()); } });
+
+function draw(now){
+  ctx.fillStyle='#0d1016'; ctx.fillRect(0,0,W,H);
+  const cx=W/2, cy=H/2;
+  const p=phase(now);
+  const pulse=0.5+0.5*Math.cos(p*2*Math.PI);      // 1 at peak, 0 at trough
+  const base=Math.min(W,H)*0.16;
+  const dotR=base*(0.55+0.6*pulse);
+
+  // ambient ring that blooms on each beat
+  const ringR=base*(0.55 + p*2.4);
+  const ringA=Math.max(0,(1-p))*0.35;
+  ctx.beginPath(); ctx.strokeStyle='rgba(255,224,180,'+ringA+')'; ctx.lineWidth=1.5;
+  ctx.arc(cx,cy,ringR,0,Math.PI*2); ctx.stroke();
+
+  // tap feedback ring
+  const fAge=now-feedback.t;
+  if(feedback.t>0 && fAge<360){
+    const fr=base*(0.55+(fAge/360)*1.4);
+    const fa=(1-fAge/360)*(feedback.perfect?0.6:feedback.good?0.4:0.5);
+    ctx.beginPath();
+    ctx.strokeStyle = feedback.perfect?'rgba(255,230,168,'+fa+')':feedback.good?'rgba(191,232,255,'+fa+')':'rgba(255,157,138,'+fa+')';
+    ctx.lineWidth=3; ctx.arc(cx,cy,fr,0,Math.PI*2); ctx.stroke();
+  }
+
+  // the dot
+  const g=ctx.createRadialGradient(cx,cy,2,cx,cy,dotR*1.6);
+  g.addColorStop(0,'rgba(255,240,210,1)');
+  g.addColorStop(0.5,'rgba(255,205,140,0.9)');
+  g.addColorStop(1,'rgba(255,205,140,0)');
+  ctx.beginPath(); ctx.fillStyle=g; ctx.arc(cx,cy,dotR*1.6,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.fillStyle='rgba(255,252,245,'+(0.7+0.3*pulse)+')'; ctx.arc(cx,cy,dotR*0.5,0,Math.PI*2); ctx.fill();
+
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

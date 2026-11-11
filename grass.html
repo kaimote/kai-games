@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>grass</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#060a10; }
+  canvas { display:block; width:100%; height:100%; }
+  #hint {
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+    font: 13px/1.4 -apple-system, system-ui, sans-serif; letter-spacing:.04em;
+    color:rgba(255,255,255,.32); pointer-events:none; transition:opacity 1.2s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">move slowly through the grass</div>
+<script>
+const c = document.getElementById('c');
+const x = c.getContext('2d');
+let W, H, DPR;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  c.width = W*DPR; c.height = H*DPR;
+  x.setTransform(DPR,0,0,DPR,0,0);
+  build();
+}
+
+// mouse
+const m = { x:-9999, y:-9999, active:false };
+let hintDone = false;
+
+// blades: anchored near the bottom, a gentle curve up
+let blades = [];
+function build(){
+  blades = [];
+  const count = Math.max(40, Math.floor(W/9));
+  for(let i=0;i<count;i++){
+    const baseX = (i/count)*W + (Math.random()-.5)*14;
+    const baseY = H + 6;
+    const h = H*(0.28 + Math.random()*0.34);          // height
+    const sway = 0.4 + Math.random()*0.8;             // natural sway amount
+    const phase = Math.random()*Math.PI*2;
+    const speed = 0.0006 + Math.random()*0.0016;
+    const lean = (Math.random()-.5)*0.18;             // static lean
+    const hue = 150 + Math.random()*40;               // green-teal
+    blades.push({baseX, baseY, h, sway, phase, speed, lean, hue,
+                 bend:0, bendV:0, glow:0});
+  }
+  blades.sort((a,b)=>a.h-b.h);
+}
+
+let last = 0;
+function frame(t){
+  const dt = Math.min(48, t-last); last = t;
+
+  // background: deep night, faint vertical light toward the horizon
+  const g = x.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, '#04070c');
+  g.addColorStop(0.6, '#081019');
+  g.addColorStop(1, '#0b141d');
+  x.fillStyle = g;
+  x.fillRect(0,0,W,H);
+
+  // warm point glow (only when on screen)
+  if(m.active){
+    const rg = x.createRadialGradient(m.x,m.y,0,m.x,m.y,120);
+    rg.addColorStop(0,'rgba(255,224,170,.30)');
+    rg.addColorStop(1,'rgba(255,224,170,0)');
+    x.fillStyle = rg;
+    x.beginPath(); x.arc(m.x,m.y,120,0,7); x.fill();
+  }
+
+  for(const b of blades){
+    const sway = Math.sin(t*b.speed + b.phase) * b.sway;
+
+    // how much the warm point pulls this blade?
+    // sample a point along the blade near its tip
+    const tipX = b.baseX + (b.lean + b.bend) * b.h + sway*b.h;
+    const tipY = b.baseY - b.h;
+    const dx = m.x - (b.baseX + b.h*0.5);
+    const dy = m.y - (b.baseY - b.h*0.5);
+    const dist = Math.hypot(dx,dy);
+    const influence = m.active ? Math.max(0, 1 - dist/170) : 0;
+
+    // target bend toward the point, clamped
+    const target = influence * Math.max(-0.5, Math.min(0.5, dx*0.0022));
+    // spring
+    b.bendV += (target - b.bend) * 0.08;
+    b.bendV *= 0.82;
+    b.bend += b.bendV;
+
+    // glow eases toward influence
+    b.glow += (influence - b.glow) * 0.15;
+
+    // draw as a few segments for a natural bend
+    const segs = 5;
+    const bend = (b.lean + b.bend);
+    x.beginPath();
+    x.moveTo(b.baseX, b.baseY);
+    for(let s=1;s<=segs;s++){
+      const f = s/segs;
+      const px = b.baseX + bend * b.h * (f*f) + sway*b.h*f;
+      const py = b.baseY - b.h*f;
+      x.lineTo(px,py);
+    }
+    const width = 1 + b.h*0.006;
+    const bright = 0.16 + b.glow*0.85;
+    x.strokeStyle = `hsla(${b.hue}, ${30+b.glow*40}%, ${18+b.glow*40}%, ${bright})`;
+    x.lineWidth = width;
+    x.lineCap = 'round';
+    x.stroke();
+
+    // lit tip dot when glowing
+    if(b.glow > 0.25){
+      const tip = blades && b;
+      x.fillStyle = `hsla(${b.hue-20}, 80%, ${55+b.glow*15}%, ${b.glow*0.7})`;
+      x.beginPath(); x.arc(tipX, tipY, 1.4+b.glow*1.6, 0, 7); x.fill();
+    }
+  }
+
+  // the warm point itself, soft
+  if(m.active){
+    x.fillStyle = 'rgba(255,240,210,.9)';
+    x.beginPath(); x.arc(m.x,m.y,2.4,0,7); x.fill();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener('pointermove', e=>{
+  m.x = e.clientX; m.y = e.clientY; m.active = true;
+  if(!hintDone){ hintDone = true; document.getElementById('hint').style.opacity = 0; }
+});
+window.addEventListener('pointerleave', ()=>{ m.active = false; });
+window.addEventListener('blur', ()=>{ m.active = false; });
+window.addEventListener('resize', resize);
+
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

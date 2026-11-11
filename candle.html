@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<title>candle</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+  }
+  canvas { display: block; }
+  #hud {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #ffd4a0;
+    font-size: 14px;
+    letter-spacing: 2px;
+    opacity: 0.8;
+  }
+  #hint {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,212,160,0.4);
+    font-size: 12px;
+    letter-spacing: 2px;
+  }
+  #gameover {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ffd4a0;
+    font-size: 18px;
+    letter-spacing: 3px;
+    text-align: center;
+    display: none;
+  }
+  #gameover .score { font-size: 32px; margin-top: 12px; }
+  #gameover .restart { font-size: 12px; margin-top: 20px; opacity: 0.6; }
+</style>
+</head>
+<body>
+<div id="hud">time: <span id="timer">0.0</span>s</div>
+<canvas id="c"></canvas>
+<div id="hint">hold &#8592; / &#8594; to lean into the wind</div>
+<div id="gameover">
+  <div>the candle went out</div>
+  <div class="score" id="final-score">0.0s</div>
+  <div class="restart">press R to relight</div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('timer');
+const hint = document.getElementById('hint');
+const gameoverEl = document.getElementById('gameover');
+const finalScoreEl = document.getElementById('final-score');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let playing = false;
+let startTime = 0;
+let elapsed = 0;
+
+const STEP = 1000 / 60;   // fixed physics step, ms — game identical at 60/120/144Hz
+let lastTime = performance.now();
+let acc = 0;
+
+// The core state is the FLAME TILT (radians from vertical).
+// Positive = leaning right. The flame wants to stay upright (0).
+const candle = {
+  tilt: 0,          // current flame lean
+  tiltVel: 0,       // angular velocity
+  stability: 1.0,   // 1 = strong, 0 = out
+};
+
+const wind = {
+  force: 0,         // current wind push (torque on flame)
+  target: 0,
+  changeTimer: 0,
+  gust: 0,
+};
+
+let particles = [];
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if ((e.key === 'r' || e.key === 'R') && !playing) reset();
+});
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+function reset() {
+  candle.tilt = 0;
+  candle.tiltVel = 0;
+  candle.stability = 1.0;
+  wind.force = 0;
+  wind.target = 0;
+  wind.gust = 0;
+  particles = [];
+  playing = true;
+  startTime = performance.now();
+  elapsed = 0;
+  acc = 0;
+  lastTime = performance.now();
+  gameoverEl.style.display = 'none';
+  hint.style.opacity = '1';
+  setTimeout(() => hint.style.opacity = '0.4', 4000);
+}
+
+function spawnFlameParticle(baseX, baseY) {
+  particles.push({
+    x: baseX + (Math.random() - 0.5) * 10,
+    y: baseY,
+    vx: (Math.random() - 0.5) * 0.4 + wind.force * 0.4,
+    vy: -(1.5 + Math.random() * 2),
+    life: 1.0,
+    size: 2 + Math.random() * 3,
+    hue: 30 + Math.random() * 25,
+  });
+}
+
+function update() {
+  if (!playing) return;
+
+  elapsed = (performance.now() - startTime) / 1000;
+  hud.textContent = elapsed.toFixed(1);
+
+  // Difficulty ramps over ~90s, caps
+  const difficulty = Math.min(elapsed / 90, 1.6);
+
+  // --- Wind: random target changes + occasional gusts ---
+  wind.changeTimer -= 1;
+  if (wind.changeTimer <= 0) {
+    wind.target = (Math.random() - 0.5) * 2 * (0.9 + difficulty * 1.0);
+    wind.changeTimer = 35 + Math.random() * 55; // in frame-ish units
+  }
+  if (Math.random() < 0.006 * (0.5 + difficulty)) {
+    wind.gust = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 3) * (0.6 + difficulty);
+  }
+  wind.gust *= 0.94;
+  wind.force += ((wind.target + wind.gust) - wind.force) * 0.04;
+
+  // --- Player counter-steer ---
+  // Player applies torque opposite to lean to hold it upright.
+  let steer = 0;
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) steer -= 1;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) steer += 1;
+  const playerTorque = steer * 0.0016;
+
+  // --- Physics: the flame is a spring toward upright, pushed by wind ---
+  const spring = -candle.tilt * 0.0085;     // restoring force (wants vertical)
+  const windTorque = wind.force * 0.0026;   // wind pushes the flame over
+  const damping = -candle.tiltVel * 0.11;   // air resistance
+
+  candle.tiltVel += (spring + windTorque + playerTorque + damping);
+  candle.tilt += candle.tiltVel;
+
+  // --- Stability drains the further the flame leans from vertical ---
+  const lean = Math.abs(candle.tilt);
+  const drain = lean * 0.006 * difficulty;
+  const recovery = 0.0011; // only heals when held nearly upright
+  candle.stability = Math.max(0, Math.min(1, candle.stability - drain + recovery));
+
+  if (candle.stability <= 0) {
+    playing = false;
+    gameoverEl.style.display = 'block';
+    finalScoreEl.textContent = elapsed.toFixed(1) + 's';
+    hint.style.display = 'none';
+  }
+
+  // --- Particles ---
+  const wickTipX = W / 2 + Math.sin(candle.tilt) * 20;
+  const wickTipY = (H - 240) - Math.cos(candle.tilt) * 20;
+  if (candle.stability > 0.1) {
+    const count = Math.floor(2 + candle.stability * 5);
+    for (let i = 0; i < count; i++) spawnFlameParticle(wickTipX, wickTipY);
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= 0.022;
+    p.vx += wind.force * 0.02;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  const cx = W / 2;
+  const baseY = H - 60;
+  const candleH = 180;
+  const topY = baseY - candleH;
+
+  // Ambient glow from flame
+  const flameX = cx + Math.sin(candle.tilt) * 20;
+  const flameY = topY - Math.cos(candle.tilt) * 20 - 5;
+  if (candle.stability > 0.05) {
+    const glowSize = 40 + candle.stability * 60;
+    const glow = ctx.createRadialGradient(flameX, flameY, 0, flameX, flameY, glowSize);
+    glow.addColorStop(0, `rgba(255, 190, 90, ${candle.stability * 0.35})`);
+    glow.addColorStop(1, 'rgba(255, 150, 50, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(flameX, flameY, glowSize, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Candle body (static)
+  ctx.fillStyle = '#f0e2cc';
+  ctx.beginPath();
+  ctx.roundRect(cx - 16, topY, 32, candleH, 5);
+  ctx.fill();
+
+  // Wick + flame, tilted
+  ctx.save();
+  ctx.translate(cx, topY);
+  ctx.rotate(candle.tilt);
+  ctx.strokeStyle = '#3a3025';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, -20);
+  ctx.stroke();
+  ctx.restore();
+
+  // Flame particles
+  for (const p of particles) {
+    const a = Math.max(0, p.life * candle.stability);
+    ctx.fillStyle = `hsla(${p.hue}, 100%, ${55 + p.life * 20}%, ${a})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Wind indicator arrows at the edges
+  if (Math.abs(wind.force) > 0.25) {
+    const dir = Math.sign(wind.force);
+    const strength = Math.min(Math.abs(wind.force), 3);
+    ctx.strokeStyle = `rgba(150, 200, 255, ${Math.min(strength * 0.25, 0.5)})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const y = H * 0.3 + i * 60;
+      const len = 15 + strength * 12;
+      const startX = dir > 0 ? W * 0.08 : W * 0.92;
+      ctx.beginPath();
+      ctx.moveTo(startX, y);
+      ctx.lineTo(startX + dir * len, y);
+      ctx.lineTo(startX + dir * (len - 6), y - 4);
+      ctx.moveTo(startX + dir * len, y);
+      ctx.lineTo(startX + dir * (len - 6), y + 4);
+      ctx.stroke();
+    }
+  }
+
+  // Stability bar
+  const barW = 140;
+  const barX = W / 2 - barW / 2;
+  const barY = H - 24;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.fillRect(barX, barY, barW, 4);
+  const g = Math.floor(100 + candle.stability * 120);
+  ctx.fillStyle = `rgba(255, ${g}, 60, 0.7)`;
+  ctx.fillRect(barX, barY, barW * candle.stability, 4);
+}
+
+function loop(now) {
+  acc += now - lastTime;
+  lastTime = now;
+  if (acc > 200) acc = 200;  // clamp so a tab stall doesn't cause a physics catch-up spiral
+  while (acc >= STEP) {
+    update();                // existing body, unchanged — now runs in fixed steps
+    acc -= STEP;
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+reset();
+</script>
+</body>
+</html>

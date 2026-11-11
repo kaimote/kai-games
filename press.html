@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>press</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1c2030; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: none; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H, dpr;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  c.width = W * dpr; c.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// active presses (currently held) and fading dents (just released)
+const active = new Map();   // pointerId -> {x, y, start}
+const fading = [];          // {x, y, t, peak}
+
+function pointFromEvent(e) {
+  return { x: e.clientX, y: e.clientY };
+}
+
+c.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  c.setPointerCapture(e.pointerId);
+  const p = pointFromEvent(e);
+  active.set(e.pointerId, { x: p.x, y: p.y, start: performance.now() });
+});
+
+c.addEventListener('pointermove', e => {
+  const a = active.get(e.pointerId);
+  if (!a) return;
+  const p = pointFromEvent(e);
+  a.x = p.x; a.y = p.y;
+});
+
+function release(e) {
+  const a = active.get(e.pointerId);
+  if (!a) return;
+  active.delete(e.pointerId);
+  const now = performance.now();
+  const t = now - a.start;
+  const peak = Math.min(1, t / 1200);
+  fading.push({ x: a.x, y: a.y, t: now, peak });
+}
+c.addEventListener('pointerup', release);
+c.addEventListener('pointercancel', release);
+
+function drawBackground(now) {
+  // slow, subtle life in the base surface
+  const s = Math.sin(now / 6000) * 0.5 + 0.5;
+  const top = [28 + s * 6, 32 + s * 6, 48 + s * 8];
+  const bot = [40 + s * 8, 40 + s * 8, 58 + s * 6];
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, `rgb(${top[0]|0},${top[1]|0},${top[2]|0})`);
+  g.addColorStop(1, `rgb(${bot[0]|0},${bot[1]|0},${bot[2]|0})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawDent(x, y, depth, alpha) {
+  const r = 55 + depth * 95;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // soft warm rim
+  const rim = ctx.createRadialGradient(x, y, r * 0.55, x, y, r * 1.5);
+  rim.addColorStop(0, 'rgba(0,0,0,0)');
+  rim.addColorStop(0.5, `rgba(255, 205, 150, ${0.06 * depth * alpha})`);
+  rim.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = rim;
+  ctx.fillRect(x - r * 1.6, y - r * 1.6, r * 3.2, r * 3.2);
+
+  // the dent: darker core, soft edges
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(10, 12, 20, ${0.85 * depth * alpha})`);
+  g.addColorStop(0.6, `rgba(14, 17, 28, ${0.4 * depth * alpha})`);
+  g.addColorStop(1, 'rgba(14, 17, 28, 0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function frame(now) {
+  drawBackground(now);
+
+  // released dents ease back out
+  for (let i = fading.length - 1; i >= 0; i--) {
+    const f = fading[i];
+    const k = (now - f.t) / 900; // recovery over ~0.9s
+    if (k >= 1) { fading.splice(i, 1); continue; }
+    const depth = f.peak * (1 - k);
+    drawDent(f.x, f.y, depth, 1 - k * 0.4);
+  }
+
+  // active dents deepen the longer you hold
+  active.forEach(a => {
+    const t = now - a.start;
+    const depth = Math.min(1, t / 1200);
+    drawDent(a.x, a.y, depth, 1);
+    // a small warm point at the contact, so you can see where your hand is
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    const p = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 6 + depth * 8);
+    p.addColorStop(0, 'rgba(255, 210, 160, 0.9)');
+    p.addColorStop(1, 'rgba(255, 210, 160, 0)');
+    ctx.fillStyle = p;
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 6 + depth * 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

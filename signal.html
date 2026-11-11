@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>signal</title>
+<style>
+  html,body{margin:0;height:100%;background:#04060c;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;cursor:none;touch-action:none}
+  #hint{position:fixed;left:0;right:0;bottom:14px;text-align:center;
+        font:12px/1.4 ui-monospace,monospace;color:#54708c;letter-spacing:.08em;
+        pointer-events:none;transition:opacity 2.5s ease}
+  #hint.gone{opacity:0}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">hold to gather light &mdash; let go to send it out</div>
+<script>
+/* signal — a dark shore and a small lamp you control.
+ * Hold anywhere to gather light; release and it goes out across the water in a ring.
+ * The ring doesn't light the stars it passes on the way out — it lets them keep
+ * their own light for a moment after. Let it go thin and it barely reaches.
+ * No score, no goal. Just sending it out and seeing what answers.
+ */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const hint = document.getElementById('hint');
+
+let W = 0, H = 0, DPR = 1, horizon = 0;
+let stars = [];
+
+function rnd(a, b) { return a + Math.random() * (b - a); }
+
+function build() {
+  stars = [];
+  const n = Math.round((W * H) / 9000);
+  for (let i = 0; i < n; i++) {
+    // mostly above the horizon (sky), a few scattered low as water glints
+    const sky = Math.random() < 0.82;
+    const y = sky ? rnd(0, horizon - 24) : rnd(horizon + 18, H - 10);
+    stars.push({
+      x: rnd(0, W),
+      y,
+      base: rnd(0.06, sky ? 0.42 : 0.16),   // its own faint light
+      r: sky ? rnd(0.5, 1.5) : rnd(0.4, 0.9),
+      tw: rnd(0.4, 1.6),                      // twinkle speed
+      ph: rnd(0, Math.PI * 2),
+      glow: 0                                 // light it lends from a passing signal
+    });
+  }
+}
+
+function fit() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.floor(W * DPR);
+  cv.height = Math.floor(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  horizon = H * 0.62;
+  build();
+}
+addEventListener('resize', fit);
+fit();
+
+// the lamp follows the pointer with a little weight, like holding it steady
+const lamp = { x: W * 0.5, y: horizon - 40, tx: W * 0.5, ty: horizon - 40 };
+let charge = 0, holding = false;
+const pulses = [];
+
+function press(x, y) {
+  lamp.tx = x; lamp.ty = Math.min(y, H - 8);
+  holding = true;
+  hint.classList.add('gone');
+}
+function release() {
+  if (!holding) return;
+  holding = false;
+  if (charge > 0.02) {
+    pulses.push({ x: lamp.x, y: lamp.y, r: 6, amp: charge, born: performance.now() });
+    if (pulses.length > 14) pulses.shift();
+  }
+  charge = 0;
+}
+cv.addEventListener('pointerdown', e => press(e.clientX, e.clientY));
+cv.addEventListener('pointermove', e => { if (holding) { lamp.tx = e.clientX; lamp.ty = Math.min(e.clientY, H - 8); } });
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); holding = true; hint.classList.add('gone'); }
+});
+addEventListener('keyup', e => { if (e.code === 'Space') release(); });
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const t = now * 0.001;
+
+  // lamp eases toward the pointer / wanders gently when idle
+  if (!holding) { lamp.tx += Math.sin(t * 0.21) * 0.6; lamp.ty += Math.cos(t * 0.17) * 0.4; }
+  lamp.x += (lamp.tx - lamp.x) * (1 - Math.pow(0.0025, dt));
+  lamp.y += (lamp.ty - lamp.y) * (1 - Math.pow(0.0025, dt));
+
+  if (holding) charge = Math.min(1, charge + dt * 0.55);
+
+  ctx.clearRect(0, 0, W, H);
+
+  // sky: a cold vertical gradient, warmer near the water
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#04060c');
+  sky.addColorStop(1, '#0a1420');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, horizon);
+  // water
+  const wat = ctx.createLinearGradient(0, horizon, 0, H);
+  wat.addColorStop(0, '#070f18');
+  wat.addColorStop(1, '#03070d');
+  ctx.fillStyle = wat; ctx.fillRect(0, horizon, W, H - horizon);
+
+  // stars
+  for (const s of stars) {
+    const tw = 0.75 + 0.25 * Math.sin(t * s.tw + s.ph);
+    const a = Math.min(1, s.base * tw + s.glow);
+    if (a <= 0.005) { s.glow = 0; continue; }
+    const rr = s.r + s.glow * 2.2;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, rr, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(190 + s.glow * 60)},${Math.round(214 + s.glow * 30)},255,${a})`;
+    ctx.fill();
+    if (s.glow > 0.05) {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, rr * 4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(180,215,255,${s.glow * 0.10})`;
+      ctx.fill();
+    }
+    s.glow *= Math.pow(0.28, dt);   // the borrowed light leaves slowly
+  }
+
+  // the far shore — a low line, only readable where a pulse crosses it
+  ctx.fillStyle = '#02050a';
+  ctx.beginPath();
+  ctx.moveTo(0, horizon);
+  for (let x = 0; x <= W; x += 24) {
+    ctx.lineTo(x, horizon - 6 - 5 * Math.sin(x * 0.004) - 3 * Math.sin(x * 0.013 + 1.2));
+  }
+  ctx.lineTo(W, horizon); ctx.lineTo(W, horizon + 2); ctx.lineTo(0, horizon + 2);
+  ctx.closePath(); ctx.fill();
+
+  // pulses: an expanding ring that lends light as it passes
+  for (let i = pulses.length - 1; i >= 0; i--) {
+    const p = pulses[i];
+    p.r += dt * (170 + p.amp * 420);
+    const life = Math.max(0, 1 - p.r / (Math.max(W, H) * 1.05));
+    const strength = p.amp * life * life;
+    if (life <= 0) { pulses.splice(i, 1); continue; }
+
+    const band = 26 + p.r * 0.09;
+    for (const s of stars) {
+      const d = Math.abs(Math.hypot(s.x - p.x, s.y - p.y) - p.r);
+      if (d > band) continue;
+      const g = strength * (1 - d / band) * (s.y > horizon ? 0.55 : 1);
+      if (g > s.glow) s.glow = g;
+    }
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(150,200,255,${strength * 0.16})`;
+    ctx.lineWidth = 1 + p.amp * 1.6;
+    ctx.stroke();
+  }
+
+  // the lamp
+  const lr = 3 + charge * 7;
+  const lg = ctx.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, lr * (5 + charge * 9));
+  lg.addColorStop(0, `rgba(255,238,205,${0.75 + charge * 0.2})`);
+  lg.addColorStop(0.16, `rgba(255,228,178,${0.22 + charge * 0.2})`);
+  lg.addColorStop(1, 'rgba(255,228,178,0)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.beginPath();
+  ctx.arc(lamp.x, lamp.y, lr * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,248,232,0.95)';
+  ctx.fill();
+
+  // its reflection, broken into bands so it reads as water
+  if (lamp.y < horizon) {
+    for (let y = horizon + 6; y < H; y += 7) {
+      const k = 1 - (y - horizon) / (H - horizon);
+      const w = (5 + charge * 16) * (0.4 + k) * (1 + 0.5 * Math.sin(y * 0.5 + t * 3));
+      ctx.fillStyle = `rgba(255,226,170,${0.10 * k * (0.5 + charge)})`;
+      ctx.fillRect(lamp.x - w / 2, y, w, 2.4);
+    }
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+setTimeout(() => hint.classList.add('gone'), 13000);
+</script>
+</body>
+</html>

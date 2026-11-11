@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8">
+<title>pool</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#0b1218;overflow:hidden;
+    font-family:ui-sans-serif,system-ui,sans-serif;color:#9fb4c4;cursor:none;}
+  canvas{display:block;width:100vw;height:100vh;}
+  #hint{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
+    font-size:12px;letter-spacing:.14em;text-transform:lowercase;opacity:.45;
+    transition:opacity 1.2s;pointer-events:none;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">move — ripples settle when you stop</div>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W, H, dpr;
+function size(){ dpr = Math.min(window.devicePixelRatio||1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W*dpr; cv.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+size(); addEventListener('resize', size);
+
+let px = W/2, py = H/2, lx = W/2, ly = H/2, t = 0, hintGone = false;
+const hint = document.getElementById('hint');
+
+// ripples: {x,y,r,max,alpha}
+let ripples = [];
+let lastDroplet = 0;
+
+function spawn(x,y,max){ ripples.push({x,y,r:2,max, a:1}); }
+
+addEventListener('pointermove', e=>{
+  const x = e.clientX, y = e.clientY;
+  const d = Math.hypot(x-lx, y-ly);
+  if(d > 8){ spawn(x,y, 46 + Math.min(d,120)*0.5); }
+  lx = px = x; ly = py = y;
+  if(!hintGone){ hintGone=true; hint.style.opacity = 0; }
+});
+addEventListener('pointerdown', e=>{ spawn(e.clientX, e.clientY, 150);
+  if(!hintGone){ hintGone=true; hint.style.opacity=0; } });
+
+function frame(){
+  t += 0.016;
+  ctx.clearRect(0,0,W,H);
+
+  // soft vignette / water base
+  const g = ctx.createRadialGradient(W/2,H/2,0, W/2,H/2, Math.max(W,H)*0.7);
+  g.addColorStop(0,'#12222e'); g.addColorStop(1,'#070d12');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // occasional self-droplet
+  if(t - lastDroplet > 2.4 + Math.random()*3){
+    lastDroplet = t;
+    spawn(Math.random()*W, Math.random()*H, 70 + Math.random()*50);
+  }
+
+  // draw ripples oldest-first
+  ripples = ripples.filter(r=> r.r < r.max);
+  for(const r of ripples){
+    r.r += (r.max - r.r)*0.06 + 0.4;
+    r.a = 1 - (r.r / r.max);
+    const lw = 1.4 + r.a*1.6;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.r, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(150,200,225,${r.a*0.5})`;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+  }
+
+  // the "you" glint — soft, follows the last position, breathes
+  const pulse = 0.5 + 0.5*Math.sin(t*1.4);
+  const gg = ctx.createRadialGradient(px,py,0, px,py, 26);
+  gg.addColorStop(0, `rgba(200,230,250,${0.5+pulse*0.2})`);
+  gg.addColorStop(1, 'rgba(200,230,250,0)');
+  ctx.fillStyle = gg;
+  ctx.beginPath(); ctx.arc(px,py,26,0,Math.PI*2); ctx.fill();
+
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

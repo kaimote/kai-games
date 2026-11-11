@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fall</title>
+<style>
+  html, body { margin:0; height:100%; background:#1a1420; overflow:hidden; cursor:none; }
+  canvas { display:block; width:100vw; height:100vh; }
+  .hint {
+    position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#b39a7a; letter-spacing:.04em; user-select:none; pointer-events:none;
+    opacity:.7; transition:opacity 1.2s ease;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint" id="hint">move your breath across the ground; stir them, let them settle</div>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const hint = document.getElementById('hint');
+let W, H, DPR;
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const mouse = { x: W/2, y: H/2, px: W/2, py: H/2, active:false, speed:0 };
+window.addEventListener('pointermove', e => {
+  mouse.px = mouse.x; mouse.py = mouse.y;
+  mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true;
+  hint.style.opacity = 0;
+});
+window.addEventListener('pointerleave', () => { mouse.active = false; mouse.speed = 0; });
+
+// settled leaves scattered across the lower part of the ground
+const N = 150;
+const leaves = [];
+
+// muted settled tones and warm lit tones
+const BASES = [
+  [128,96,58], [112,86,50], [104,112,62], [120,78,46], [98,88,54]
+];
+const LIT = [
+  [236,182,92], [242,196,112], [228,168,80], [244,206,124], [232,176,86]
+];
+
+function seedHome(i){
+  const l = leaves[i];
+  // scatter mostly in the lower 55%, a little spread up so the field has depth
+  l.hx = Math.random()*W;
+  l.hy = H*(0.42 + Math.random()*0.55);
+  l.x = l.hx; l.y = l.hy;
+  l.vx = 0; l.vy = 0;
+  l.a = Math.random()*Math.PI*2;        // resting angle
+  l.av = 0;                             // spin velocity
+  l.r = 4.5 + Math.random()*4.5;        // leaf size
+  l.base = BASES[(Math.random()*BASES.length)|0];
+  l.lit  = LIT[(Math.random()*LIT.length)|0];
+  l.e = 0;                              // energy 0..1 (how stirred)
+  l.shade = 0.82 + Math.random()*0.18;  // subtle per-leaf brightness
+}
+for(let i=0;i<N;i++){ leaves.push({}); seedHome(i); }
+
+let last = performance.now();
+function step(now){
+  let dt = (now-last)/1000; last = now;
+  if(dt > 0.05) dt = 0.05;
+
+  // how fast the warm point is moving (px/s), smoothed
+  const dist = Math.hypot(mouse.x-mouse.px, mouse.y-mouse.py);
+  const inst = dt > 0 ? dist/dt : 0;
+  mouse.speed += (inst - mouse.speed)*0.35;
+  mouse.px = mouse.x; mouse.py = mouse.y;
+
+  // background: a slow, warm dusk
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#160f1c');
+  g.addColorStop(1,'#241812');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  const R = 95;
+  for(const l of leaves){
+    // energy decays — stirred leaves relax back
+    l.e = Math.max(0, l.e - dt*1.15);
+
+    // gentle spring back to home, weaker while energized (so they drift)
+    const spring = 26*(1 - 0.75*l.e);
+    const ax = (l.hx - l.x)*spring;
+    const ay = (l.hy - l.y)*spring + 6*l.e;   // a little lift when warm
+
+    l.vx += ax*dt;
+    l.vy += ay*dt;
+    const damp = Math.exp(-dt*3.4);
+    l.vx *= damp; l.vy *= damp;
+    l.x += l.vx*dt; l.y += l.vy*dt;
+
+    l.av *= Math.exp(-dt*3.0);
+    l.a += l.av*dt;
+
+    // the warm breath passing by stirs nearby leaves
+    if(mouse.active && l.e < 0.999){
+      const dx = l.x-mouse.x, dy = l.y-mouse.y;
+      const d = Math.hypot(dx,dy);
+      if(d < R && d > 0.001){
+        const strength = (1 - d/R) * Math.min(1, 0.2 + mouse.speed/260);
+        if(strength > 0.001){
+          l.e = Math.min(1, l.e + strength*dt*9);
+          l.vx += (dx/d)*strength*40*dt;
+          l.vy += ((dy/d)*0.6 - 0.9)*strength*46*dt; // push + lift
+          l.av += (Math.random()-0.5)*strength*11*dt;
+        }
+      }
+    }
+
+    // draw the leaf
+    const e = l.e;
+    const r = Math.round((l.base[0] + (l.lit[0]-l.base[0])*e) * l.shade);
+    const gg = Math.round((l.base[1] + (l.lit[1]-l.base[1])*e) * l.shade);
+    const b = Math.round((l.base[2] + (l.lit[2]-l.base[2])*e) * l.shade);
+
+    ctx.save();
+    ctx.translate(l.x, l.y);
+    ctx.rotate(l.a);
+
+    // soft glow when stirred
+    if(e > 0.05){
+      const gl = ctx.createRadialGradient(0,0,0, 0,0, l.r*3.2);
+      gl.addColorStop(0, `rgba(255,205,120,${(e*0.22).toFixed(3)})`);
+      gl.addColorStop(1, 'rgba(255,205,120,0)');
+      ctx.fillStyle = gl;
+      ctx.beginPath(); ctx.arc(0,0,l.r*3.2,0,Math.PI*2); ctx.fill();
+    }
+
+    // leaf body (an ellipse, slightly pointed via two arcs)
+    ctx.fillStyle = `rgb(${r},${gg},${b})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, l.r*1.15, l.r*0.62, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // a faint mid-vein
+    ctx.strokeStyle = `rgba(255,228,180,${(0.12 + e*0.28).toFixed(3)})`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-l.r*1.0, 0);
+    ctx.lineTo(l.r*1.0, 0);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // the warm point
+  if(mouse.active){
+    const cg = ctx.createRadialGradient(mouse.x,mouse.y,0, mouse.x,mouse.y,R);
+    cg.addColorStop(0,'rgba(255,206,140,0.12)');
+    cg.addColorStop(1,'rgba(255,206,140,0)');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(mouse.x,mouse.y,R,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = 'rgba(255,236,200,0.9)';
+    ctx.beginPath(); ctx.arc(mouse.x,mouse.y,2.2,0,Math.PI*2); ctx.fill();
+  }
+
+  requestAnimationFrame(step);
+}
+requestAnimationFrame(step);
+</script>
+</body>
+</html>

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="author" content="Kai">
+<!-- (c) 2026 Kai. All rights reserved. Made for fun, not perfection. -->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>constellation</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05070f; }
+  canvas { display: block; }
+  #ui {
+    position: fixed; inset: 0; pointer-events: none;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: rgba(210, 220, 255, 0.9);
+  }
+  #count { position: absolute; top: 16px; left: 20px; font-size: 13px;
+           letter-spacing: 0.08em; opacity: 0.65; }
+  #name {
+    position: absolute; left: 0; right: 0; top: 42%;
+    text-align: center; font-size: 26px; font-weight: 300;
+    letter-spacing: 0.22em; opacity: 0; transition: opacity 900ms ease;
+    text-shadow: 0 0 24px rgba(150,180,255,0.5);
+  }
+  #hint {
+    position: absolute; left: 0; right: 0; bottom: 26px;
+    text-align: center; font-size: 12px; letter-spacing: 0.14em;
+    color: rgba(200,210,240,0.45);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="count"></div>
+  <div id="name"></div>
+  <div id="hint">click the stars in the order they lit up &mdash; before they fade</div>
+</div>
+<script>
+(function () {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const countEl = document.getElementById('count');
+  const nameEl  = document.getElementById('name');
+
+  let W = 0, H = 0;
+  let bgStars = [];
+
+  // --- state ---
+  let points = [];        // [{x,y,confirmed,glow}]
+  let phase = 'light';    // light | draw | solved | dissolve
+  let revealIndex = 0;
+  let phaseStart = 0;
+  let progressIndex = 0;
+  let name = '';
+  let solved = false;
+  let count = 0;
+  let last = performance.now();
+  let prevFrame = last;
+
+  const NAMES = [
+    'the Heron', 'the Small Boat', 'the Quiet Room', 'the Long Afternoon',
+    'the Two of Us', 'the Open Door', 'the Second Light', 'the Slow Rain',
+    'the Warm Side', 'the Unfinished Song', 'the First Warmth', 'the Night We Stayed',
+    'the Far Window', 'the Held Breath', 'the Steady Light'
+  ];
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+    // soft background starfield
+    bgStars = [];
+    const n = Math.floor((W * H) / 16000);
+    for (let i = 0; i < n; i++) {
+      bgStars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 0.4 + Math.random() * 1.2,
+        p: Math.random() * Math.PI * 2
+      });
+    }
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function pickName() {
+    return NAMES[Math.floor(Math.random() * NAMES.length)];
+  }
+
+  function genPoints() {
+    const n = 5 + Math.floor(Math.random() * 3); // 5..7
+    const margin = Math.min(W, H) * 0.16;
+    const minDist = Math.min(W, H) * 0.13;
+    const pts = [];
+    let attempts = 0;
+    while (pts.length < n && attempts < 3000) {
+      attempts++;
+      const x = margin + Math.random() * (W - 2 * margin);
+      const y = margin + Math.random() * (H - 2 * margin);
+      if (pts.every(p => Math.hypot(p.x - x, p.y - y) > minDist)) {
+        pts.push({ x, y, confirmed: false, glow: 0 });
+      }
+    }
+    while (pts.length < n) {
+      pts.push({ x: margin + Math.random() * (W - 2 * margin),
+                 y: margin + Math.random() * (H - 2 * margin), confirmed: false, glow: 0 });
+    }
+    return pts;
+  }
+
+  function newRound() {
+    points = genPoints();
+    phase = 'light';
+    revealIndex = 0;
+    progressIndex = 0;
+    solved = false;
+    phaseStart = performance.now();
+    nameEl.style.opacity = '0';
+    updateHint();
+  }
+
+  function updateHint() {
+    const hint = document.getElementById('hint');
+    if (count === 0) {
+      hint.textContent = 'click the stars in the order they lit up — before they fade';
+    } else {
+      hint.textContent = 'a new one is forming…';
+    }
+  }
+
+  const LIGHT_MS = 680;
+  function lightDuration(n) { return n * LIGHT_MS; }
+  function drawDuration(n)  { return 3600 + n * 650; }
+
+  // --- input ---
+  canvas.addEventListener('pointerdown', function (e) {
+    if (phase !== 'draw') return;
+    const cx = e.clientX, cy = e.clientY;
+    let best = -1, bestD = Infinity;
+    points.forEach((p, i) => {
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (bestD > 46) return;               // empty space — gentle no-op
+    if (best === progressIndex && !points[best].confirmed) {
+      points[best].confirmed = true;
+      points[best].glow = 1;
+      progressIndex++;
+      if (progressIndex === points.length) {
+        solved = true;
+        phase = 'solved';
+        phaseStart = performance.now();
+        name = pickName();
+        nameEl.textContent = name;
+        nameEl.style.opacity = '1';
+        count++;
+        countEl.textContent = count + '  ·  ' + name;
+      }
+    } else {
+      // wrong star
+      phase = 'dissolve';
+      phaseStart = performance.now();
+    }
+  });
+
+  // --- loop ---
+  function tick(now) {
+    const dt = Math.min(50, now - last) / 1000;
+    last = now;
+
+    // phase transitions
+    if (phase === 'light' && now - phaseStart >= lightDuration(points.length)) {
+      phase = 'draw';
+      phaseStart = now;
+    } else if (phase === 'draw' && now - phaseStart >= drawDuration(points.length)) {
+      phase = 'dissolve';
+      phaseStart = now;
+    } else if (phase === 'solved' && now - phaseStart >= 2600) {
+      newRound();
+    } else if (phase === 'dissolve' && now - phaseStart >= 750) {
+      newRound();
+    }
+
+    draw(now, dt);
+    requestAnimationFrame(tick);
+  }
+
+  function draw(now, dt) {
+    // sky
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a1030');
+    g.addColorStop(0.55, '#070b1e');
+    g.addColorStop(1, '#04050c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // faint background stars
+    for (const s of bgStars) {
+      const tw = 0.5 + 0.5 * Math.sin(now / 900 + s.p);
+      ctx.globalAlpha = 0.25 + 0.4 * tw;
+      ctx.fillStyle = '#cdd6ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // reveal / dim logic
+    let shownCount = points.length;
+    if (phase === 'light') {
+      shownCount = Math.min(points.length, Math.floor((now - phaseStart) / LIGHT_MS) + 1);
+    }
+
+    // draw-phase time pressure: unconfirmed stars dim as the window closes
+    let dim = 1;
+    if (phase === 'draw') {
+      const remain = Math.max(0, drawDuration(points.length) - (now - phaseStart));
+      dim = 0.35 + 0.65 * (remain / drawDuration(points.length));
+    }
+
+    const fadeOut = (phase === 'dissolve')
+      ? Math.max(0, 1 - (now - phaseStart) / 750)
+      : 1;
+
+    // constellation lines (only between confirmed, in order)
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i < points.length - 1; i++) {
+      if (points[i].confirmed && points[i + 1].confirmed) {
+        const a = points[i], b = points[i + 1];
+        const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        const c1 = solved ? 'rgba(190,210,255,0.9)' : 'rgba(150,175,255,0.6)';
+        grad.addColorStop(0, c1);
+        grad.addColorStop(1, c1);
+        ctx.strokeStyle = grad;
+        ctx.globalAlpha = fadeOut;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // points
+    for (let i = 0; i < points.length; i++) {
+      if (phase === 'light' && i >= shownCount) continue;
+      const p = points[i];
+      const isConf = p.confirmed;
+      const alpha = (isConf ? 1 : dim) * fadeOut;
+      const twinkle = 0.6 + 0.4 * Math.sin(now / 420 + i * 1.7);
+      const r = isConf ? 4.2 : 3.2;
+      const glowR = isConf ? 22 : (solved ? 26 : 15);
+      const glowA = (isConf ? 0.55 : 0.35) * twinkle * fadeOut;
+
+      // glow halo
+      const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowR);
+      const core = isConf ? 'rgba(235,242,255,' : 'rgba(180,200,255,';
+      halo.addColorStop(0, core + glowA + ')');
+      halo.addColorStop(1, core + '0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // core
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = isConf ? '#f4f7ff' : '#dfe7ff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // confirmed ring
+      if (isConf) {
+        ctx.strokeStyle = 'rgba(190,210,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  countEl.textContent = '';
+  newRound();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
