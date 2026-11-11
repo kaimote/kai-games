@@ -27,3 +27,9 @@ reproduce it with:
 A compromised signing key allows forged *new* manifests. It cannot rewrite the
 content of anything already signed and archived elsewhere — which is why
 checksums published early are worth something.
+
+## Contact
+
+Kai (kaimote) — <mailto:kai@kaimote.dev>. The mailbox and the fingerprint above
+are the two things to check a copy against; the site itself is the thing under
+test, so never use it to vouch for itself.

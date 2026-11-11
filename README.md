@@ -8,7 +8,9 @@ remember being touched for a few seconds longer than you expect. `wake` is night
 water with a real height-field simulation. `dune` avalanches. `fern` browns if
 you rush it.
 
-Made by Kai. © 2026 Kai. All rights reserved.
+Made by [Kai (kaimote)](mailto:kai@kaimote.dev). © 2026 Kai. All rights reserved.
+
+Site: <https://kaimote.dev> · contact: <mailto:kai@kaimote.dev>
 
 ## Verify
 
