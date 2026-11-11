@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>how the bubble graph works · Kai</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { background: #07090f; color: #dfe6f3; font: 400 16px/1.7 -apple-system, "SF Pro Text", system-ui, sans-serif;
+         max-width: 680px; margin: 0 auto; padding: 8vh 6vw 12vh; }
+  h1 { font-size: 24px; margin-bottom: 6px; } h2 { font-size: 16px; margin: 30px 0 8px; color: #57c7ff; }
+  p, li { color: #9fb0c9; } code, pre { font: 500 13px/1.6 ui-monospace, Menlo, monospace; color: #cfe0f5; }
+  pre { background: rgba(148,170,220,.07); border: 1px solid rgba(148,170,220,.14); border-radius: 10px;
+        padding: 12px 14px; overflow-x: auto; }
+  a { color: #7f8ea8; } dt { color: #dfe6f3; font-weight: 500; margin-top: 12px; } dd { margin: 2px 0 0; color: #9fb0c9; }
+</style>
+</head>
+<body>
+<h1>how the bubble graph works</h1>
+<p>Companion to <a href="./">the editor</a>. One JSON file: no database, no account, no request after load.</p>
+<pre>{
+  "version": 1,
+  "name": "my structure",
+  "nodes": [
+    { "id": "a", "label": "a", "notes": "", "r": 34,
+      "color": "#5fe3a1", "pos": [-52, 14, -10] }
+  ],
+  "edges": [
+    { "a": "a", "b": "b", "kind": "link" }
+  ]
+}</pre>
+
+<h2>Four relationships, two places</h2>
+<p>Two of them are <b>not stored at all</b>. Encapsulation and partial overlap are recomputed from
+radii and positions every frame, because position <i>is</i> the claim. Store containment and it can
+disagree with the picture the moment a bubble is dragged; derive it and it cannot.</p>
+<dl>
+  <dt>encapsulated</dt><dd><code>dist(a,b) + r_small ≤ r_big</code>, parent = the smallest sphere that still
+  encloses. A parent is always strictly larger, so the parent chain strictly increases in radius and
+  cannot cycle — that is the whole cycle-proof, no guard needed.</dd>
+  <dt>overlapping</dt><dd><code>dist(a,b) &lt; r_a + r_b</code> for a pair that is not nested. Drawn as the
+  circle where the two shells meet.</dd>
+  <dt>linked</dt><dd>an <code>edges</code> entry, <code>kind: "link"</code>. A spring resting at 1.14 ×
+  (r_a + r_b): touching, not merged.</dd>
+  <dt>gravitationally pulled</dt><dd>an <code>edges</code> entry, <code>kind: "gravity"</code>. Same spring,
+  rest length 3.4 × (r_a + r_b), softer. Disconnected in the data, nearby on screen — which is exactly
+  the difference: a link <i>is</i> a relationship, gravity is only an adjacency you asked for.</dd>
+</dl>
+<p>Anything with no edge and no enclosure is free-floating. Origin gravity is a boundary with a dead
+zone, not a field: inside it the force is exactly zero, so a relaxed graph stays relaxed instead of
+convecting forever.</p>
+
+<h2>Why the layout stops</h2>
+<p>Force-directed layouts that terminate do so by <i>cooling</i>, not by damping. A monotone scalar
+(<code>alpha</code>) scales every force and reaches zero in a fixed number of steps, so "done" is a
+property of the schedule rather than a race against a threshold. Tuning damping alone does not fix
+it: the slowest mode of a coupled spring system is arbitrarily slow, and a damped version of this
+editor decayed to a floor and then crept for minutes without landing.</p>
+<p>A step is the unit of time. Driving the schedule from elapsed wall time makes convergence speed a
+function of frame rate — measured, 36 seconds at 8 fps for a 7-bubble graph.</p>
+
+<h2>Your file, and nothing else</h2>
+<p>The graph lives in the tab. Export gives you a .json you own; Import, dragging a file onto the
+page, or pasting json loads one back. There is no server component and no browser-side store, so
+nothing about your structure outlives the tab unless you take the file. That is the whole storage
+model, and it is deliberate: a tool that stores nobody's structure has no structure to leak, and
+nothing to migrate later.</p>
+<p>Running it locally: <code>python3 server.py</code> in the project folder serves the same static
+files over a real origin and prints the address. That server is read-only — it cannot write anything,
+because the editor no longer asks it to.</p>
+
+<h2>Provenance</h2>
+<p>Published under kaimote.dev with everything else I ship: <code>MANIFEST.sha256</code> plus a
+detached Ed25519 signature over it, and the public key. See
+<a href="https://kaimote.dev/VERIFY.md">VERIFY.md</a> for what a successful check does and does not
+prove.</p>
+<p>Kai (kaimote) — <a href="mailto:kai@kaimote.dev">kai@kaimote.dev</a></p>
+</body>
+</html>
